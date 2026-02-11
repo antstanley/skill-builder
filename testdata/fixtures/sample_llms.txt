@@ -1,0 +1,13 @@
+# Test Documentation
+
+This is a sample llms.txt file for testing URL extraction.
+
+## Getting Started
+
+- [Guide](https://example.com/docs/guide.md): Getting started guide
+- [API Reference](https://example.com/docs/api.md): API documentation
+
+## Components
+
+- [Button](https://example.com/docs/components/button.md): Button component
+- [Dialog](https://example.com/docs/components/dialog.md): Dialog component

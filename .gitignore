@@ -1,0 +1,24 @@
+# Build output
+dist/
+*.skill
+target/
+
+# Rust
+Cargo.lock
+
+# Python (legacy)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

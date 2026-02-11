@@ -1,0 +1,16 @@
+{
+  "skills": [
+    {
+      "name": "test-skill",
+      "description": "A test skill for testing",
+      "llms_txt_url": "https://example.com/llms.txt"
+    },
+    {
+      "name": "another-skill",
+      "description": "Another test skill",
+      "llms_txt_url": "https://another.example.com/llms.txt",
+      "base_url": "https://another.example.com",
+      "path_prefix": "/documentation"
+    }
+  ]
+}

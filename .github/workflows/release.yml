@@ -1,0 +1,128 @@
+name: Package and Release Skills
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.3)"
+        required: true
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    permissions:
+      contents: write
+
+    steps:
+      - name: Determine tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            CHECKOUT_REF="${{ github.ref }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            TAG=$(gh api "repos/${{ github.repository }}/tags" --paginate --jq ".[] | select(.commit.sha == \"$HEAD_SHA\") | .name" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            if [ -z "$TAG" ]; then
+              echo "No version tag found on PR head commit $HEAD_SHA, skipping release"
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            CHECKOUT_REF="${{ github.event.pull_request.base.ref }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            CHECKOUT_REF="$TAG"
+          fi
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "ref=$CHECKOUT_REF" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        if: steps.version.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.ref }}
+
+      - name: Install Rust toolchain
+        if: steps.version.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        if: steps.version.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest
+        if: steps.version.outputs.skip != 'true'
+        uses: taiki-e/install-action@nextest
+
+      - name: Run tests
+        if: steps.version.outputs.skip != 'true'
+        run: cargo nextest run --profile ci
+
+      - name: Build release binary
+        if: steps.version.outputs.skip != 'true'
+        run: cargo build --release
+
+      - name: Extract changelog for version
+        if: steps.version.outputs.skip != 'true'
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract section between this version header and the next version header (or end of file)
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "["ver"]")) found=1
+            }
+            found {print}
+          ' CHANGELOG.md)
+
+          # Save to file for body_path
+          echo "$CHANGELOG" > release_notes.md
+
+          # Check if we found content
+          if [ -z "$CHANGELOG" ]; then
+            echo "Warning: No changelog found for version $VERSION"
+            echo "## Release ${{ steps.version.outputs.tag }}" > release_notes.md
+            echo "" >> release_notes.md
+            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.md
+          fi
+
+      - name: Validate and package skills
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          mkdir -p dist
+
+          # Get all skills from config
+          SKILLS=$(./target/release/skill-builder list | grep -E '^\s+\S+' | awk '{print $1}')
+
+          for skill in $SKILLS; do
+            echo "=== Validating and packaging $skill ==="
+            ./target/release/skill-builder validate "$skill"
+            ./target/release/skill-builder package "$skill" --output dist/
+          done
+
+          ls -la dist/
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: skill-builder ${{ steps.version.outputs.tag }}
+          body_path: release_notes.md
+          files: |
+            dist/*.skill
+            target/release/skill-builder
+          fail_on_unmatched_files: false
