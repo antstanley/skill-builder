@@ -35,11 +35,38 @@ impl SkillConfig {
         }
 
         // Derive from llms_txt_url
-        let url = url::Url::parse(&self.llms_txt_url)
-            .context("Failed to parse llms_txt_url")?;
+        let url = url::Url::parse(&self.llms_txt_url).context("Failed to parse llms_txt_url")?;
 
-        Ok(format!("{}://{}", url.scheme(), url.host_str().unwrap_or("")))
+        Ok(format!(
+            "{}://{}",
+            url.scheme(),
+            url.host_str().unwrap_or("")
+        ))
     }
+}
+
+/// Repository configuration for S3-compatible skill storage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepositoryConfig {
+    /// Display name for the repository.
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// S3 bucket name.
+    #[serde(default)]
+    pub bucket_name: Option<String>,
+
+    /// AWS region (defaults to "us-east-1").
+    #[serde(default = "default_region")]
+    pub region: String,
+
+    /// Custom endpoint URL for S3-compatible providers.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+fn default_region() -> String {
+    "us-east-1".to_string()
 }
 
 /// Root configuration structure containing all skills.
@@ -47,6 +74,10 @@ impl SkillConfig {
 pub struct Config {
     /// List of skill configurations.
     pub skills: Vec<SkillConfig>,
+
+    /// Optional repository configuration for S3-compatible storage.
+    #[serde(default)]
+    pub repository: Option<RepositoryConfig>,
 }
 
 impl Config {
@@ -95,7 +126,10 @@ mod tests {
         assert_eq!(config.skills.len(), 1);
         assert_eq!(config.skills[0].name, "test-skill");
         assert_eq!(config.skills[0].description, "A test skill");
-        assert_eq!(config.skills[0].llms_txt_url, "https://example.com/llms.txt");
+        assert_eq!(
+            config.skills[0].llms_txt_url,
+            "https://example.com/llms.txt"
+        );
     }
 
     #[test]
@@ -138,7 +172,10 @@ mod tests {
 
         let config = Config::parse(json).unwrap();
         let skill = &config.skills[0];
-        assert_eq!(skill.base_url.as_deref(), Some("https://custom.example.com"));
+        assert_eq!(
+            skill.base_url.as_deref(),
+            Some("https://custom.example.com")
+        );
         assert_eq!(skill.path_prefix.as_deref(), Some("/docs"));
     }
 
@@ -237,6 +274,54 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_config_without_repository() {
+        let json = r#"{
+            "skills": [
+                {"name": "test", "llms_txt_url": "https://example.com/llms.txt"}
+            ]
+        }"#;
+
+        let config = Config::parse(json).unwrap();
+        assert!(config.repository.is_none());
+    }
+
+    #[test]
+    fn test_parse_config_with_repository() {
+        let json = r#"{
+            "skills": [],
+            "repository": {
+                "name": "my-repo",
+                "bucket_name": "my-bucket",
+                "region": "eu-west-1",
+                "endpoint": "https://s3.example.com"
+            }
+        }"#;
+
+        let config = Config::parse(json).unwrap();
+        let repo = config.repository.unwrap();
+        assert_eq!(repo.name.as_deref(), Some("my-repo"));
+        assert_eq!(repo.bucket_name.as_deref(), Some("my-bucket"));
+        assert_eq!(repo.region, "eu-west-1");
+        assert_eq!(repo.endpoint.as_deref(), Some("https://s3.example.com"));
+    }
+
+    #[test]
+    fn test_parse_repository_default_region() {
+        let json = r#"{
+            "skills": [],
+            "repository": {
+                "bucket_name": "my-bucket"
+            }
+        }"#;
+
+        let config = Config::parse(json).unwrap();
+        let repo = config.repository.unwrap();
+        assert_eq!(repo.region, "us-east-1");
+        assert!(repo.name.is_none());
+        assert!(repo.endpoint.is_none());
+    }
+
+    #[test]
     fn test_multiple_skills_config() {
         let json = r#"{
             "skills": [
@@ -259,9 +344,15 @@ mod tests {
         assert_eq!(config.skills.len(), 2);
 
         let shadcn = config.find_skill("shadcn-svelte").unwrap();
-        assert_eq!(shadcn.get_base_url().unwrap(), "https://www.shadcn-svelte.com");
+        assert_eq!(
+            shadcn.get_base_url().unwrap(),
+            "https://www.shadcn-svelte.com"
+        );
 
         let another = config.find_skill("another-lib").unwrap();
-        assert_eq!(another.get_base_url().unwrap(), "https://docs.another.example.com");
+        assert_eq!(
+            another.get_base_url().unwrap(),
+            "https://docs.another.example.com"
+        );
     }
 }

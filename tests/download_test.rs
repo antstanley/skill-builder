@@ -18,14 +18,16 @@ async fn test_download_llms_txt_from_mock_server() {
     // Mock llms.txt
     Mock::given(method("GET"))
         .and(path("/llms.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(
-            r#"# Documentation
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(
+                r#"# Documentation
 
 - [Guide](MOCK_URL/docs/guide.md)
 - [API](MOCK_URL/docs/api.md)
 "#
-            .replace("MOCK_URL", &mock_server.uri()),
-        ))
+                .replace("MOCK_URL", &mock_server.uri()),
+            ),
+        )
         .mount(&mock_server)
         .await;
 
@@ -54,12 +56,10 @@ async fn test_download_llms_txt_from_mock_server() {
     };
 
     // Run blocking operation in a separate thread
-    let results = tokio::task::spawn_blocking(move || {
-        download_skill_docs(&skill, &temp_path)
-    })
-    .await
-    .unwrap()
-    .unwrap();
+    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.success));
@@ -78,7 +78,7 @@ async fn test_handle_404_gracefully() {
     // Mock llms.txt with a link to a non-existent file
     Mock::given(method("GET"))
         .and(path("/llms.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(&format!(
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
             "# Docs\n- [Missing]({}/docs/missing.md)",
             mock_server.uri()
         )))
@@ -103,12 +103,10 @@ async fn test_handle_404_gracefully() {
         path_prefix: None,
     };
 
-    let results = tokio::task::spawn_blocking(move || {
-        download_skill_docs(&skill, &temp_path)
-    })
-    .await
-    .unwrap()
-    .unwrap();
+    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
+        .await
+        .unwrap()
+        .unwrap();
 
     // Should have one result with success=false
     assert_eq!(results.len(), 1);
@@ -123,7 +121,7 @@ async fn test_handle_redirect() {
     // Mock llms.txt with redirect
     Mock::given(method("GET"))
         .and(path("/llms.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(&format!(
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
             "# Docs\n- [Doc]({}/docs/doc.md)",
             mock_server.uri()
         )))
@@ -134,7 +132,8 @@ async fn test_handle_redirect() {
     Mock::given(method("GET"))
         .and(path("/docs/doc.md"))
         .respond_with(
-            ResponseTemplate::new(302).insert_header("Location", &format!("{}/final.md", mock_server.uri())),
+            ResponseTemplate::new(302)
+                .insert_header("Location", &format!("{}/final.md", mock_server.uri())),
         )
         .mount(&mock_server)
         .await;
@@ -157,12 +156,10 @@ async fn test_handle_redirect() {
     };
 
     // reqwest follows redirects by default
-    let results = tokio::task::spawn_blocking(move || {
-        download_skill_docs(&skill, &temp_path)
-    })
-    .await
-    .unwrap()
-    .unwrap();
+    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(results.len(), 1);
     assert!(results[0].success);
@@ -188,10 +185,7 @@ fn test_url_to_local_path_integration() {
     )
     .unwrap();
 
-    assert_eq!(
-        path.to_string_lossy(),
-        "docs/components/button.md"
-    );
+    assert_eq!(path.to_string_lossy(), "docs/components/button.md");
 }
 
 #[test]

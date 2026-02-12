@@ -1,85 +1,221 @@
-name: Package and Release Skills
+name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v1.0.3)"
-        required: true
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0)"
+        required: true
 
 jobs:
-  build:
+  prepare:
     runs-on: ubuntu-latest
     if: |
-      github.event_name != 'pull_request' || github.event.pull_request.merged == true
-    permissions:
-      contents: write
-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-v'))
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Determine tag
+      - name: Determine version
         id: version
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.tag }}"
-            CHECKOUT_REF="${{ github.ref }}"
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            TAG=$(gh api "repos/${{ github.repository }}/tags" --paginate --jq ".[] | select(.commit.sha == \"$HEAD_SHA\") | .name" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-            if [ -z "$TAG" ]; then
-              echo "No version tag found on PR head commit $HEAD_SHA, skipping release"
-              echo "skip=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            CHECKOUT_REF="${{ github.event.pull_request.base.ref }}"
           else
-            TAG="${GITHUB_REF#refs/tags/}"
-            CHECKOUT_REF="$TAG"
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            TAG="${BRANCH#release-}"
           fi
           VERSION="${TAG#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "ref=$CHECKOUT_REF" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION (tag: $TAG)"
 
       - name: Checkout repository
-        if: steps.version.outputs.skip != 'true'
         uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.version.outputs.ref }}
+
+      - name: Verify tag exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if ! gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Warning: Tag $TAG does not exist on the repository yet"
+            echo "Release will create the tag from the current main branch"
+          fi
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            archive_name: x86_64-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            archive_name: aarch64-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            archive_name: x86_64-apple-darwin
+            runner: macos-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            archive_name: aarch64-apple-darwin
+            runner: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            archive_name: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        if: steps.version.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo dependencies
-        if: steps.version.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "--release"
+
+      - name: Package binary (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../skill-builder-${{ matrix.archive_name }}.tar.gz skill-builder
+          cd ../../..
+
+      - name: Package binary (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/skill-builder.exe" -DestinationPath "skill-builder-${{ matrix.archive_name }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.archive_name }}
+          path: skill-builder-${{ matrix.archive_name }}.${{ matrix.archive }}
+
+  test:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-nextest
-        if: steps.version.outputs.skip != 'true'
         uses: taiki-e/install-action@nextest
 
       - name: Run tests
-        if: steps.version.outputs.skip != 'true'
         run: cargo nextest run --profile ci
 
-      - name: Build release binary
-        if: steps.version.outputs.skip != 'true'
-        run: cargo build --release
+      - name: Upload test results
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: target/nextest/junit.xml
 
-      - name: Extract changelog for version
-        if: steps.version.outputs.skip != 'true'
+      - name: Shellcheck install.sh
+        run: shellcheck install.sh
+
+      - name: Run install script tests
+        run: bash tests/install_script_test.sh
+
+  package-skills:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-x86_64-linux-gnu
+
+      - name: Extract binary
+        run: |
+          tar -xzf skill-builder-x86_64-linux-gnu.tar.gz
+          chmod +x skill-builder
+
+      - name: Validate and package skills
+        run: |
+          mkdir -p dist
+
+          SKILLS=$(./skill-builder list 2>/dev/null | grep -E '^\s+\S+' | awk '{print $1}') || true
+
+          if [ -z "$SKILLS" ]; then
+            echo "No skills found to package"
+            exit 0
+          fi
+
+          for skill in $SKILLS; do
+            echo "=== Validating and packaging $skill ==="
+            ./skill-builder validate "$skill"
+            ./skill-builder package "$skill" --output dist/
+          done
+
+          ls -la dist/
+
+      - name: Upload skill artifacts
+        uses: actions/upload-artifact@v4
+        if: hashFiles('dist/*.skill') != ''
+        with:
+          name: skills
+          path: dist/*.skill
+
+  release:
+    needs: [prepare, build, test, package-skills]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download skill artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: skills
+          path: artifacts
+
+      - name: Copy install script
+        run: cp install.sh artifacts/
+
+      - name: Extract changelog
         id: changelog
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          # Extract section between this version header and the next version header (or end of file)
+          VERSION="${{ needs.prepare.outputs.version }}"
           CHANGELOG=$(awk -v ver="$VERSION" '
             /^## \[/ {
               if (found) exit
@@ -88,41 +224,20 @@ jobs:
             found {print}
           ' CHANGELOG.md)
 
-          # Save to file for body_path
-          echo "$CHANGELOG" > release_notes.md
-
-          # Check if we found content
           if [ -z "$CHANGELOG" ]; then
-            echo "Warning: No changelog found for version $VERSION"
-            echo "## Release ${{ steps.version.outputs.tag }}" > release_notes.md
+            echo "## Release ${{ needs.prepare.outputs.tag }}" > release_notes.md
             echo "" >> release_notes.md
             echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.md
+          else
+            echo "$CHANGELOG" > release_notes.md
           fi
 
-      - name: Validate and package skills
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          mkdir -p dist
-
-          # Get all skills from config
-          SKILLS=$(./target/release/skill-builder list | grep -E '^\s+\S+' | awk '{print $1}')
-
-          for skill in $SKILLS; do
-            echo "=== Validating and packaging $skill ==="
-            ./target/release/skill-builder validate "$skill"
-            ./target/release/skill-builder package "$skill" --output dist/
-          done
-
-          ls -la dist/
-
       - name: Create GitHub Release
-        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: skill-builder ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: skill-builder ${{ needs.prepare.outputs.tag }}
           body_path: release_notes.md
           files: |
-            dist/*.skill
-            target/release/skill-builder
+            artifacts/*
           fail_on_unmatched_files: false

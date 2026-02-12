@@ -39,7 +39,10 @@ pub fn download_url(client: &Client, url: &str) -> Result<String> {
 /// Extract all .md URLs from llms.txt content.
 pub fn extract_urls(content: &str) -> Vec<String> {
     let re = Regex::new(r"https?://[^\s\)>\]]+\.md").unwrap();
-    let urls: HashSet<String> = re.find_iter(content).map(|m| m.as_str().to_string()).collect();
+    let urls: HashSet<String> = re
+        .find_iter(content)
+        .map(|m| m.as_str().to_string())
+        .collect();
     let mut urls: Vec<String> = urls.into_iter().collect();
     urls.sort();
     urls
@@ -74,8 +77,7 @@ pub fn detect_path_prefix(urls: &[String]) -> Option<String> {
         // Only look at directory segments (exclude the last one which is the filename)
         let dir_count = if first.len() > 1 { first.len() - 1 } else { 0 };
 
-        for i in 0..dir_count {
-            let segment = first[i];
+        for (i, &segment) in first.iter().enumerate().take(dir_count) {
             if segments.iter().all(|s| s.get(i) == Some(&segment)) {
                 common_prefix.push(segment);
             } else {
@@ -133,10 +135,7 @@ pub struct DownloadResult {
 }
 
 /// Download all documentation for a skill.
-pub fn download_skill_docs(
-    skill: &SkillConfig,
-    source_dir: &Path,
-) -> Result<Vec<DownloadResult>> {
+pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec<DownloadResult>> {
     let client = create_client()?;
 
     println!("Downloading llms.txt from {}", skill.llms_txt_url);
@@ -164,7 +163,7 @@ pub fn download_skill_docs(
     if docs_dir.exists() {
         for entry in fs::read_dir(&docs_dir)? {
             let entry = entry?;
-            if entry.path().is_file() && entry.path().extension().map_or(false, |e| e == "md") {
+            if entry.path().is_file() && entry.path().extension().is_some_and(|e| e == "md") {
                 fs::remove_file(entry.path())?;
             }
         }

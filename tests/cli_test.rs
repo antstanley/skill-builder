@@ -7,6 +7,7 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+#[allow(deprecated)]
 fn skill_builder() -> Command {
     Command::cargo_bin("skill-builder").unwrap()
 }
@@ -67,10 +68,7 @@ fn test_install_help() {
 
 #[test]
 fn test_list_help() {
-    skill_builder()
-        .args(["list", "--help"])
-        .assert()
-        .success();
+    skill_builder().args(["list", "--help"]).assert().success();
 }
 
 #[test]
@@ -273,6 +271,92 @@ fn test_install_from_file() {
 
     // Verify installation
     assert!(install_dir.join("install-test-skill/SKILL.md").exists());
+}
+
+#[test]
+fn test_repo_help() {
+    skill_builder()
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("S3-compatible hosted repository"));
+}
+
+#[test]
+fn test_repo_upload_help() {
+    skill_builder()
+        .args(["repo", "upload", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Upload"));
+}
+
+#[test]
+fn test_repo_download_help() {
+    skill_builder()
+        .args(["repo", "download", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Download"));
+}
+
+#[test]
+fn test_repo_install_help() {
+    skill_builder()
+        .args(["repo", "install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Install"));
+}
+
+#[test]
+fn test_repo_delete_help() {
+    skill_builder()
+        .args(["repo", "delete", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Delete"));
+}
+
+#[test]
+fn test_repo_list_help() {
+    skill_builder()
+        .args(["repo", "list", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("List"));
+}
+
+#[test]
+fn test_cache_help() {
+    skill_builder()
+        .args(["cache", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("local skill cache"));
+}
+
+#[test]
+fn test_cache_list_help() {
+    skill_builder()
+        .args(["cache", "list", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("List"));
+}
+
+#[test]
+fn test_cache_clear_help() {
+    skill_builder()
+        .args(["cache", "clear", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Clear"));
+}
+
+#[test]
+fn test_cache_list_runs() {
+    skill_builder().args(["cache", "list"]).assert().success();
 }
 
 #[test]

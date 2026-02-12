@@ -83,9 +83,7 @@ pub fn install_skill(
         anyhow::bail!("HTTP {} when downloading {}", response.status(), url);
     }
 
-    let bytes = response
-        .bytes()
-        .context("Failed to read response body")?;
+    let bytes = response.bytes().context("Failed to read response body")?;
 
     // Create install directory
     fs::create_dir_all(&install_dir)?;
@@ -133,7 +131,11 @@ pub fn install_skill(
     }
 
     println!();
-    println!("Successfully installed {} skill to {}", skill_name, skill_path.display());
+    println!(
+        "Successfully installed {} skill to {}",
+        skill_name,
+        skill_path.display()
+    );
     println!();
     println!("The skill will be available in Claude Code for projects in this directory.");
 
@@ -200,7 +202,11 @@ pub fn install_from_file<P: AsRef<Path>, Q: AsRef<Path>>(
     }
 
     println!();
-    println!("Successfully installed {} skill to {}", skill_name, skill_path.display());
+    println!(
+        "Successfully installed {} skill to {}",
+        skill_name,
+        skill_path.display()
+    );
 
     Ok(InstallResult {
         skill_name,
