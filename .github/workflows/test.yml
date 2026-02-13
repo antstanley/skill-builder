@@ -64,3 +64,16 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+  shellcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck
+        run: shellcheck install.sh
+
+      - name: Run install script tests
+        run: bash tests/install_script_test.sh

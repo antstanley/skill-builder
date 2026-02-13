@@ -178,20 +178,20 @@ pub fn validate_skill<P: AsRef<Path>>(skill_path: P) -> ValidationResult {
     result
 }
 
-/// Print validation result to stdout.
-pub fn print_validation_result(result: &ValidationResult) {
+/// Print validation result using the Output abstraction.
+pub fn print_validation_result(result: &ValidationResult, output: &crate::output::Output) {
     if result.valid {
-        println!("Skill is valid!");
+        output.status("Valid", "Skill is valid!");
         for warning in &result.warnings {
-            println!("  Warning: {}", warning);
+            output.warn(warning);
         }
     } else {
-        println!("Validation failed:");
+        output.error("Validation failed:");
         for error in &result.errors {
-            println!("  - {}", error);
+            output.step(&format!("- {}", error));
         }
         for warning in &result.warnings {
-            println!("  Warning: {}", warning);
+            output.warn(warning);
         }
     }
 }

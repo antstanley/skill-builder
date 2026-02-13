@@ -10,7 +10,11 @@ fn test_validate_fixture_valid_skill() {
     let skill_path = common::fixture_path("valid_skill");
     let result = validate_skill(&skill_path);
 
-    assert!(result.valid, "Expected valid skill, got errors: {:?}", result.errors);
+    assert!(
+        result.valid,
+        "Expected valid skill, got errors: {:?}",
+        result.errors
+    );
     assert!(result.errors.is_empty());
 }
 
@@ -31,7 +35,11 @@ fn test_validate_temp_valid_skill() {
 
     let result = validate_skill(&skill_dir);
 
-    assert!(result.valid, "Expected valid skill, got errors: {:?}", result.errors);
+    assert!(
+        result.valid,
+        "Expected valid skill, got errors: {:?}",
+        result.errors
+    );
 }
 
 #[test]

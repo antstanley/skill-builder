@@ -106,3 +106,33 @@ fn test_skill_names() {
     assert!(names.contains(&"test-skill"));
     assert!(names.contains(&"another-skill"));
 }
+
+#[test]
+fn test_config_without_repository() {
+    let config_path = common::testdata_dir().join("skills.json");
+    let config = Config::load(&config_path).unwrap();
+
+    assert!(config.repository.is_none());
+}
+
+#[test]
+fn test_config_with_repository() {
+    let config_path = common::testdata_dir().join("skills_with_repo.json");
+    let config = Config::load(&config_path).unwrap();
+
+    let repo = config.repository.unwrap();
+    assert_eq!(repo.name.as_deref(), Some("test-repo"));
+    assert_eq!(repo.bucket_name.as_deref(), Some("test-skills-bucket"));
+    assert_eq!(repo.region, "us-west-2");
+    assert_eq!(repo.endpoint.as_deref(), Some("https://s3.example.com"));
+}
+
+#[test]
+fn test_config_backward_compatibility() {
+    // Existing skills.json without repository should still parse
+    let config_path = common::testdata_dir().join("skills.json");
+    let config = Config::load(&config_path).unwrap();
+
+    assert!(!config.skills.is_empty());
+    assert!(config.repository.is_none());
+}
