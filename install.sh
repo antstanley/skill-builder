@@ -9,7 +9,7 @@
 set -eu
 
 REPO="antstanley/skill-builder"
-BINARY_NAME="skill-builder"
+BINARY_NAME="sb"
 
 detect_os() {
     os=$(uname -s)
@@ -103,7 +103,7 @@ download_and_install() {
     _ext="$3"
     _install_dir="$4"
 
-    _archive_name="${BINARY_NAME}-${_target}.${_ext}"
+    _archive_name="skill-builder-${_target}.${_ext}"
     _url="https://github.com/${REPO}/releases/download/${_version}/${_archive_name}"
 
     echo "Downloading ${BINARY_NAME} ${_version} for ${_target}..."
@@ -163,7 +163,7 @@ download_and_install() {
 }
 
 main() {
-    echo "=== skill-builder installer ==="
+    echo "=== sb (skill-builder) installer ==="
     echo ""
 
     os=$(detect_os)

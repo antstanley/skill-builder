@@ -97,14 +97,14 @@ jobs:
         if: matrix.archive == 'tar.gz'
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czf ../../../skill-builder-${{ matrix.archive_name }}.tar.gz skill-builder
+          tar -czf ../../../skill-builder-${{ matrix.archive_name }}.tar.gz sb
           cd ../../..
 
       - name: Package binary (Windows)
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/skill-builder.exe" -DestinationPath "skill-builder-${{ matrix.archive_name }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/sb.exe" -DestinationPath "skill-builder-${{ matrix.archive_name }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -158,13 +158,13 @@ jobs:
       - name: Extract binary
         run: |
           tar -xzf skill-builder-x86_64-linux-gnu.tar.gz
-          chmod +x skill-builder
+          chmod +x sb
 
       - name: Validate and package skills
         run: |
           mkdir -p dist
 
-          SKILLS=$(./skill-builder list 2>/dev/null | grep -E '^\s+\S+' | awk '{print $1}') || true
+          SKILLS=$(./sb list 2>/dev/null | grep -E '^\s+\S+' | awk '{print $1}') || true
 
           if [ -z "$SKILLS" ]; then
             echo "No skills found to package"
@@ -173,8 +173,8 @@ jobs:
 
           for skill in $SKILLS; do
             echo "=== Validating and packaging $skill ==="
-            ./skill-builder validate "$skill"
-            ./skill-builder package "$skill" --output dist/
+            ./sb validate "$skill"
+            ./sb package "$skill" --output dist/
           done
 
           ls -la dist/

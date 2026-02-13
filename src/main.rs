@@ -1,34 +1,36 @@
-//! skill-builder CLI - Build Claude Code skills from llms.txt URLs.
+//! sb CLI - Build Claude Code skills from llms.txt URLs.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 
-use skill_builder::cache::SkillCache;
 use skill_builder::config::Config;
 use skill_builder::download::{download_from_url, download_skill_docs};
-use skill_builder::install::{install_from_file, install_skill};
+use skill_builder::index::load_index;
+use skill_builder::install::install_from_file;
+use skill_builder::local_storage::LocalStorageClient;
 use skill_builder::package::package_skill;
 use skill_builder::repository::Repository;
 use skill_builder::s3::S3Client;
+use skill_builder::storage::StorageOperations;
 use skill_builder::validate::{print_validation_result, validate_skill};
 
 /// Build Claude Code skills from llms.txt URLs.
 #[derive(Parser)]
-#[command(name = "skill-builder")]
+#[command(name = "sb")]
 #[command(
     version,
     about,
     long_about = "A CLI tool that builds Claude Code skills from any llms.txt URL.\n\nSkills are built by downloading documentation, validating the skill structure,\npackaging into distributable .skill files, and optionally publishing to an\nS3-compatible repository.\n\nConfigure skills in a skills.json file or use --url for ad-hoc downloads."
 )]
 #[command(
-    after_help = "Examples:\n  skill-builder download my-skill\n  skill-builder validate my-skill\n  skill-builder package my-skill --output dist/\n  skill-builder install my-skill --version 1.0.0\n  skill-builder repo upload my-skill 1.0.0\n  skill-builder cache list"
+    after_help = "Examples:\n  sb download my-skill\n  sb validate my-skill\n  sb package my-skill --output dist/\n  sb install my-skill --version 1.0.0\n  sb repo upload my-skill 1.0.0\n  sb local list"
 )]
 struct Cli {
-    /// Path to skills.json configuration file
-    #[arg(short, long, default_value = "skills.json")]
-    config: PathBuf,
+    /// Path to skills configuration file
+    #[arg(short, long)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -39,7 +41,7 @@ enum Commands {
     /// Download documentation for a skill
     #[command(
         long_about = "Download documentation for a skill from its llms.txt URL.\n\nFetches the llms.txt index, extracts all linked .md files, and saves them\nlocally. Use a skill name from skills.json or provide a URL directly.",
-        after_help = "Examples:\n  skill-builder download my-skill\n  skill-builder download --all\n  skill-builder download --url https://example.com/llms.txt --name my-skill\n  skill-builder download my-skill --source-dir ./docs"
+        after_help = "Examples:\n  sb download my-skill\n  sb download --all\n  sb download --url https://example.com/llms.txt --name my-skill\n  sb download my-skill --source-dir ./docs"
     )]
     Download {
         /// Name of the skill to download (from skills.json)
@@ -65,7 +67,7 @@ enum Commands {
     /// Validate a skill's structure and metadata
     #[command(
         long_about = "Validate a skill's structure and metadata.\n\nChecks that the skill directory contains a valid SKILL.md with YAML frontmatter\nincluding required name and description fields. Also checks for a references/\ndirectory and warns about unresolved TODOs.",
-        after_help = "Examples:\n  skill-builder validate my-skill\n  skill-builder validate ./path/to/skill\n  skill-builder validate my-skill --skills-dir ./custom-skills"
+        after_help = "Examples:\n  sb validate my-skill\n  sb validate ./path/to/skill\n  sb validate my-skill --skills-dir ./custom-skills"
     )]
     Validate {
         /// Name of the skill to validate, or path to skill directory
@@ -79,7 +81,7 @@ enum Commands {
     /// Package a skill into a distributable .skill file
     #[command(
         long_about = "Package a skill into a distributable .skill file.\n\nValidates the skill, then creates a zip archive containing the SKILL.md and\nreferences/ directory. The output file is named <skill-name>.skill.",
-        after_help = "Examples:\n  skill-builder package my-skill\n  skill-builder package my-skill --output ./releases\n  skill-builder package ./path/to/skill --output dist/"
+        after_help = "Examples:\n  sb package my-skill\n  sb package my-skill --output ./releases\n  sb package ./path/to/skill --output dist/"
     )]
     Package {
         /// Name of the skill to package, or path to skill directory
@@ -94,10 +96,10 @@ enum Commands {
         skills_dir: PathBuf,
     },
 
-    /// Install a skill from GitHub releases or local file
+    /// Install a skill from local repo, remote repo, or GitHub releases
     #[command(
-        long_about = "Install a skill from GitHub releases or a local .skill file.\n\nDownloads the .skill archive from a GitHub release (or reads a local file),\nthen extracts it into the installation directory for use with Claude Code.",
-        after_help = "Examples:\n  skill-builder install my-skill\n  skill-builder install my-skill --version 1.0.0\n  skill-builder install my-skill --file ./dist/my-skill.skill\n  skill-builder install my-skill --repo user/repo --install-dir ~/.claude/skills"
+        long_about = "Install a skill from the local repository, remote S3 repository, or GitHub releases.\n\nBy default, searches local repo → remote repo → GitHub releases in order.\nUse --local, --remote, or --github to restrict to a single source.\nAlternatively, use --file to install from a local .skill file directly.",
+        after_help = "Examples:\n  sb install my-skill\n  sb install my-skill --version 1.0.0\n  sb install my-skill --local\n  sb install my-skill --remote\n  sb install my-skill --github --repo user/repo\n  sb install my-skill --file ./dist/my-skill.skill\n  sb install my-skill --install-dir ~/.claude/skills"
     )]
     Install {
         /// Name of the skill to install
@@ -115,6 +117,18 @@ enum Commands {
         #[arg(long)]
         file: Option<PathBuf>,
 
+        /// Install from local repository only
+        #[arg(long, conflicts_with_all = ["remote", "github", "file"])]
+        local: bool,
+
+        /// Install from remote S3 repository only
+        #[arg(long, conflicts_with_all = ["local", "github", "file"])]
+        remote: bool,
+
+        /// Install from GitHub releases only
+        #[arg(long, conflicts_with_all = ["local", "remote", "file"])]
+        github: bool,
+
         /// Installation directory
         #[arg(long, default_value = ".claude/skills")]
         install_dir: PathBuf,
@@ -129,22 +143,29 @@ enum Commands {
     /// Manage the S3-compatible skill repository
     #[command(
         long_about = "Manage skills in an S3-compatible hosted repository.\n\nRequires a 'repository' section in skills.json with bucket_name and optional\nregion/endpoint. Authentication uses the standard AWS credential chain\n(environment variables, ~/.aws/credentials, IAM roles).",
-        after_help = "Examples:\n  skill-builder repo upload my-skill 1.0.0\n  skill-builder repo download my-skill --version 1.0.0\n  skill-builder repo install my-skill\n  skill-builder repo delete my-skill --yes\n  skill-builder repo list"
+        after_help = "Examples:\n  sb repo upload my-skill 1.0.0\n  sb repo download my-skill --version 1.0.0\n  sb repo install my-skill\n  sb repo delete my-skill --yes\n  sb repo list"
     )]
     Repo {
         #[command(subcommand)]
         action: RepoAction,
     },
 
-    /// Manage the local skill cache
+    /// Manage the local skill repository
     #[command(
-        long_about = "Manage the local skill cache.\n\nSkills downloaded from the repository are cached locally for faster access.\nCache is stored in the platform-appropriate cache directory:\n  Linux:  ~/.cache/skill-builder/skills/\n  macOS:  ~/Library/Caches/skill-builder/skills/",
-        after_help = "Examples:\n  skill-builder cache list\n  skill-builder cache clear\n  skill-builder cache clear --skill my-skill"
+        long_about = "Manage the local skill repository.\n\nSkills can be stored locally for offline access or as a cache for the remote\nrepository. Local repository is stored at $HOME/.skill-builder/local/ by default.",
+        after_help = "Examples:\n  sb local list\n  sb local clear\n  sb local clear --skill my-skill"
     )]
-    Cache {
+    Local {
         #[command(subcommand)]
-        action: CacheAction,
+        action: LocalAction,
     },
+
+    /// Initialize global configuration
+    #[command(
+        long_about = "Initialize the global skill-builder configuration.\n\nCreates a configuration file at $HOME/.skill-builder/skills.config.json with\noptions for setting up a local skill repository. Run this once to get started.",
+        after_help = "Examples:\n  sb init"
+    )]
+    Init,
 }
 
 #[derive(Subcommand)]
@@ -152,7 +173,7 @@ enum RepoAction {
     /// Upload a skill to the repository
     #[command(
         long_about = "Upload a .skill file to the S3 repository.\n\nIf --file is not specified, defaults to dist/<skill>.skill. Skill metadata\n(description, llms_txt_url) is read from skills.json if available.\nOptionally include a CHANGELOG.md and/or archive the source directory.",
-        after_help = "Examples:\n  skill-builder repo upload my-skill 1.0.0\n  skill-builder repo upload my-skill 1.0.0 --file ./my-skill.skill\n  skill-builder repo upload my-skill 1.0.0 --changelog CHANGELOG.md --source-dir ./source"
+        after_help = "Examples:\n  sb repo upload my-skill 1.0.0\n  sb repo upload my-skill 1.0.0 --file ./my-skill.skill\n  sb repo upload my-skill 1.0.0 --changelog CHANGELOG.md --source-dir ./source"
     )]
     Upload {
         /// Skill name
@@ -177,7 +198,7 @@ enum RepoAction {
     /// Download a skill from the repository
     #[command(
         long_about = "Download a .skill file from the S3 repository.\n\nDownloads the specified version (or latest) and caches it locally.\nIf --output is specified, copies the file to that directory.",
-        after_help = "Examples:\n  skill-builder repo download my-skill\n  skill-builder repo download my-skill --version 1.0.0\n  skill-builder repo download my-skill --output ./downloads"
+        after_help = "Examples:\n  sb repo download my-skill\n  sb repo download my-skill --version 1.0.0\n  sb repo download my-skill --output ./downloads"
     )]
     Download {
         /// Skill name
@@ -195,7 +216,7 @@ enum RepoAction {
     /// Download and install a skill from the repository
     #[command(
         long_about = "Download a skill from the S3 repository and install it.\n\nCombines download and install in one step: fetches the .skill file\n(using cache when available) and extracts it to the install directory.",
-        after_help = "Examples:\n  skill-builder repo install my-skill\n  skill-builder repo install my-skill --version 1.0.0\n  skill-builder repo install my-skill --install-dir ~/.claude/skills"
+        after_help = "Examples:\n  sb repo install my-skill\n  sb repo install my-skill --version 1.0.0\n  sb repo install my-skill --install-dir ~/.claude/skills"
     )]
     Install {
         /// Skill name
@@ -213,7 +234,7 @@ enum RepoAction {
     /// Delete a skill from the repository
     #[command(
         long_about = "Delete a skill (or a specific version) from the S3 repository.\n\nRemoves the .skill file, changelog, and source archive from S3 and updates\nthe skills index. Also clears matching entries from the local cache.\nRequires --yes to confirm.",
-        after_help = "Examples:\n  skill-builder repo delete my-skill --yes\n  skill-builder repo delete my-skill --version 1.0.0 --yes"
+        after_help = "Examples:\n  sb repo delete my-skill --yes\n  sb repo delete my-skill --version 1.0.0 --yes"
     )]
     Delete {
         /// Skill name
@@ -231,7 +252,7 @@ enum RepoAction {
     /// List skills in the repository
     #[command(
         long_about = "List all skills in the S3 repository.\n\nDisplays each skill's name, description, source URL, and available versions.\nOptionally filter to a single skill.",
-        after_help = "Examples:\n  skill-builder repo list\n  skill-builder repo list --skill my-skill"
+        after_help = "Examples:\n  sb repo list\n  sb repo list --skill my-skill"
     )]
     List {
         /// Filter by skill name
@@ -241,17 +262,17 @@ enum RepoAction {
 }
 
 #[derive(Subcommand)]
-enum CacheAction {
-    /// List all cached skills
+enum LocalAction {
+    /// List all skills in the local repository
     #[command(
-        long_about = "List all skills and versions stored in the local cache.\n\nShows each cached skill name and version, plus the cache directory path."
+        long_about = "List all skills and versions stored in the local repository.\n\nShows each skill name and version, plus the repository directory path."
     )]
     List,
 
-    /// Clear cached skills
+    /// Clear skills from the local repository
     #[command(
-        long_about = "Clear skills from the local cache.\n\nRemoves all cached skills, or only a specific skill if --skill is provided.",
-        after_help = "Examples:\n  skill-builder cache clear\n  skill-builder cache clear --skill my-skill"
+        long_about = "Clear skills from the local repository.\n\nRemoves all locally stored skills, or only a specific skill if --skill is provided.",
+        after_help = "Examples:\n  sb local clear\n  sb local clear --skill my-skill"
     )]
     Clear {
         /// Only clear a specific skill (default: clear all)
@@ -296,7 +317,7 @@ fn run() -> Result<()> {
             }
 
             // Load config
-            let config = Config::load(&cli.config)?;
+            let config = Config::load_with_fallback(cli.config.as_deref())?;
 
             if all {
                 // Download all skills
@@ -374,27 +395,35 @@ fn run() -> Result<()> {
             version,
             repo,
             file,
+            local,
+            remote,
+            github,
             install_dir,
         } => {
             if let Some(file_path) = file {
-                // Install from local file
+                // Install from local file directly
                 install_from_file(&file_path, &install_dir)?;
             } else {
-                // Install from GitHub releases
-                install_skill(
-                    &skill,
-                    version.as_deref(),
-                    repo.as_deref(),
-                    Some(&install_dir),
-                )?;
+                // Use the install resolver for source cascade
+                let config = Config::load_with_fallback(cli.config.as_deref())?;
+                let options = skill_builder::install_resolver::InstallOptions {
+                    skill_name: &skill,
+                    version: version.as_deref(),
+                    github_repo: repo.as_deref(),
+                    install_dir: &install_dir,
+                    local_only: local,
+                    remote_only: remote,
+                    github_only: github,
+                };
+                skill_builder::install_resolver::resolve_and_install(&config, &options)?;
             }
         }
 
         Commands::List => {
-            let config = Config::load(&cli.config)?;
+            let config = Config::load_with_fallback(cli.config.as_deref())?;
 
             if config.skills.is_empty() {
-                println!("No skills configured in {}", cli.config.display());
+                println!("No skills configured.");
             } else {
                 println!("Configured skills:");
                 println!();
@@ -415,27 +444,38 @@ fn run() -> Result<()> {
         }
 
         Commands::Repo { action } => {
-            handle_repo_command(&cli.config, action)?;
+            handle_repo_command(cli.config.as_deref(), action)?;
         }
 
-        Commands::Cache { action } => {
-            handle_cache_command(action)?;
+        Commands::Local { action } => {
+            handle_local_command(cli.config.as_deref(), action)?;
+        }
+
+        Commands::Init => {
+            skill_builder::init::run_init()?;
         }
     }
 
     Ok(())
 }
 
-fn handle_repo_command(config_path: &PathBuf, action: RepoAction) -> Result<()> {
-    let config = Config::load(config_path)?;
+fn handle_repo_command(config_path: Option<&std::path::Path>, action: RepoAction) -> Result<()> {
+    let config = Config::load_with_fallback(config_path)?;
     let repo_config = config
         .repository
         .as_ref()
         .context("No 'repository' section found in config. Add one to use repo commands.")?;
 
     let client = S3Client::new(repo_config)?;
-    let cache = SkillCache::new()?;
-    let repo = Repository::new(client, cache);
+
+    // Set up optional local cache
+    let repo = if repo_config.local_is_cache() {
+        let local_path = repo_config.local_repo_path();
+        let local_cache = LocalStorageClient::new(&local_path)?;
+        Repository::new_with_cache(client, local_cache)
+    } else {
+        Repository::new(client)
+    };
 
     match action {
         RepoAction::Upload {
@@ -541,37 +581,69 @@ fn handle_repo_command(config_path: &PathBuf, action: RepoAction) -> Result<()> 
     Ok(())
 }
 
-fn handle_cache_command(action: CacheAction) -> Result<()> {
-    let cache = SkillCache::new()?;
+fn handle_local_command(config_path: Option<&std::path::Path>, action: LocalAction) -> Result<()> {
+    let config = Config::load_with_fallback(config_path)?;
+
+    let local_path = config
+        .repository
+        .as_ref()
+        .map(|r| r.local_repo_path())
+        .unwrap_or_else(skill_builder::config::default_local_repo_path);
+
+    let client = LocalStorageClient::with_dir(&local_path);
 
     match action {
-        CacheAction::List => {
-            let entries = cache.list_cached()?;
-
-            if entries.is_empty() {
-                println!("No cached skills.");
-                println!("Cache directory: {}", cache.cache_dir().display());
-            } else {
-                println!("Cached skills:");
-                println!();
-                for (name, version) in &entries {
-                    println!("  {} v{}", name, version);
+        LocalAction::List => {
+            let index = load_index(&client);
+            match index {
+                Ok(index) if !index.skills.is_empty() => {
+                    println!("Local repository skills:");
+                    println!();
+                    for entry in &index.skills {
+                        let mut versions: Vec<&str> =
+                            entry.versions.keys().map(|s| s.as_str()).collect();
+                        versions.sort();
+                        versions.reverse();
+                        for ver in &versions {
+                            println!("  {} v{}", entry.name, ver);
+                        }
+                    }
+                    println!();
+                    println!("Local repository: {}", local_path.display());
                 }
-                println!();
-                println!("Cache directory: {}", cache.cache_dir().display());
+                _ => {
+                    // Also list raw skill files if no index
+                    let keys = client.list_objects("skills/").unwrap_or_default();
+                    if keys.is_empty() {
+                        println!("No skills in local repository.");
+                    } else {
+                        println!("Local repository skills:");
+                        println!();
+                        for key in &keys {
+                            if key.ends_with(".skill") {
+                                println!("  {}", key);
+                            }
+                        }
+                    }
+                    println!("Local repository: {}", local_path.display());
+                }
             }
         }
 
-        CacheAction::Clear { skill } => {
+        LocalAction::Clear { skill } => {
             if let Some(name) = skill {
-                cache.remove_all(&name)?;
-                println!("Cleared cache for {}", name);
-            } else {
-                let entries = cache.list_cached()?;
-                for (name, version) in &entries {
-                    cache.remove(name, version)?;
+                let prefix = format!("skills/{}/", name);
+                let keys = client.list_objects(&prefix).unwrap_or_default();
+                for key in &keys {
+                    client.delete_object(key).ok();
                 }
-                println!("Cleared all cached skills.");
+                println!("Cleared local repository for {}", name);
+            } else {
+                let keys = client.list_objects("skills/").unwrap_or_default();
+                for key in &keys {
+                    client.delete_object(key).ok();
+                }
+                println!("Cleared all skills from local repository.");
             }
         }
     }

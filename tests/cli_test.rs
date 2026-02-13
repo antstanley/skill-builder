@@ -8,14 +8,13 @@ use std::fs;
 use tempfile::TempDir;
 
 #[allow(deprecated)]
-fn skill_builder() -> Command {
-    Command::cargo_bin("skill-builder").unwrap()
+fn sb() -> Command {
+    Command::cargo_bin("sb").unwrap()
 }
 
 #[test]
 fn test_help() {
-    skill_builder()
-        .arg("--help")
+    sb().arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains("builds Claude Code skills"));
@@ -23,8 +22,7 @@ fn test_help() {
 
 #[test]
 fn test_version() {
-    skill_builder()
-        .arg("--version")
+    sb().arg("--version")
         .assert()
         .success()
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
@@ -32,8 +30,7 @@ fn test_version() {
 
 #[test]
 fn test_download_help() {
-    skill_builder()
-        .args(["download", "--help"])
+    sb().args(["download", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Download documentation"));
@@ -41,8 +38,7 @@ fn test_download_help() {
 
 #[test]
 fn test_validate_help() {
-    skill_builder()
-        .args(["validate", "--help"])
+    sb().args(["validate", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Validate"));
@@ -50,8 +46,7 @@ fn test_validate_help() {
 
 #[test]
 fn test_package_help() {
-    skill_builder()
-        .args(["package", "--help"])
+    sb().args(["package", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Package"));
@@ -59,8 +54,7 @@ fn test_package_help() {
 
 #[test]
 fn test_install_help() {
-    skill_builder()
-        .args(["install", "--help"])
+    sb().args(["install", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Install"));
@@ -68,15 +62,14 @@ fn test_install_help() {
 
 #[test]
 fn test_list_help() {
-    skill_builder().args(["list", "--help"]).assert().success();
+    sb().args(["list", "--help"]).assert().success();
 }
 
 #[test]
 fn test_validate_valid_skill() {
     let skill_path = common::fixture_path("valid_skill");
 
-    skill_builder()
-        .args(["validate", &skill_path.to_string_lossy()])
+    sb().args(["validate", &skill_path.to_string_lossy()])
         .assert()
         .success()
         .stdout(predicate::str::contains("Skill is valid"));
@@ -86,8 +79,7 @@ fn test_validate_valid_skill() {
 fn test_validate_invalid_skill_exits_nonzero() {
     let skill_path = common::fixture_path("invalid_skill");
 
-    skill_builder()
-        .args(["validate", &skill_path.to_string_lossy()])
+    sb().args(["validate", &skill_path.to_string_lossy()])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Validation failed"));
@@ -95,8 +87,7 @@ fn test_validate_invalid_skill_exits_nonzero() {
 
 #[test]
 fn test_validate_nonexistent_skill() {
-    skill_builder()
-        .args(["validate", "/nonexistent/skill"])
+    sb().args(["validate", "/nonexistent/skill"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
@@ -110,16 +101,15 @@ fn test_package_valid_skill() {
 
     let output_dir = temp.path().join("dist");
 
-    skill_builder()
-        .args([
-            "package",
-            &skill_dir.to_string_lossy(),
-            "--output",
-            &output_dir.to_string_lossy(),
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Successfully packaged"));
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &output_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("Successfully packaged"));
 
     // Verify output file exists
     assert!(output_dir.join("package-test-skill.skill").exists());
@@ -133,23 +123,21 @@ fn test_package_invalid_skill_fails() {
 
     let output_dir = temp.path().join("dist");
 
-    skill_builder()
-        .args([
-            "package",
-            &skill_dir.to_string_lossy(),
-            "--output",
-            &output_dir.to_string_lossy(),
-        ])
-        .assert()
-        .failure();
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &output_dir.to_string_lossy(),
+    ])
+    .assert()
+    .failure();
 }
 
 #[test]
 fn test_list_with_config() {
     let config_path = common::testdata_dir().join("skills.json");
 
-    skill_builder()
-        .args(["--config", &config_path.to_string_lossy(), "list"])
+    sb().args(["--config", &config_path.to_string_lossy(), "list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("test-skill"))
@@ -158,8 +146,7 @@ fn test_list_with_config() {
 
 #[test]
 fn test_list_missing_config() {
-    skill_builder()
-        .args(["--config", "/nonexistent/skills.json", "list"])
+    sb().args(["--config", "/nonexistent/skills.json", "list"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Failed to read config file"));
@@ -169,8 +156,7 @@ fn test_list_missing_config() {
 fn test_download_requires_skill_or_flags() {
     let config_path = common::testdata_dir().join("skills.json");
 
-    skill_builder()
-        .args(["--config", &config_path.to_string_lossy(), "download"])
+    sb().args(["--config", &config_path.to_string_lossy(), "download"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("specify a skill name"));
@@ -178,8 +164,7 @@ fn test_download_requires_skill_or_flags() {
 
 #[test]
 fn test_download_url_requires_name() {
-    skill_builder()
-        .args(["download", "--url", "https://example.com/llms.txt"])
+    sb().args(["download", "--url", "https://example.com/llms.txt"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("--name is required"));
@@ -194,15 +179,14 @@ fn test_validate_with_skills_dir() {
     let skill_dir = skills_dir.join("my-skill");
     common::create_valid_skill(&skill_dir);
 
-    skill_builder()
-        .args([
-            "validate",
-            "my-skill",
-            "--skills-dir",
-            &skills_dir.to_string_lossy(),
-        ])
-        .assert()
-        .success();
+    sb().args([
+        "validate",
+        "my-skill",
+        "--skills-dir",
+        &skills_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
 }
 
 #[test]
@@ -216,17 +200,16 @@ fn test_package_with_skills_dir() {
 
     let output_dir = temp.path().join("dist");
 
-    skill_builder()
-        .args([
-            "package",
-            "my-skill",
-            "--skills-dir",
-            &skills_dir.to_string_lossy(),
-            "--output",
-            &output_dir.to_string_lossy(),
-        ])
-        .assert()
-        .success();
+    sb().args([
+        "package",
+        "my-skill",
+        "--skills-dir",
+        &skills_dir.to_string_lossy(),
+        "--output",
+        &output_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
 
     assert!(output_dir.join("my-skill.skill").exists());
 }
@@ -242,32 +225,30 @@ fn test_install_from_file() {
     let package_dir = temp.path().join("packages");
     fs::create_dir_all(&package_dir).unwrap();
 
-    skill_builder()
-        .args([
-            "package",
-            &skill_dir.to_string_lossy(),
-            "--output",
-            &package_dir.to_string_lossy(),
-        ])
-        .assert()
-        .success();
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &package_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
 
     // Install from the packaged file
     let install_dir = temp.path().join(".claude/skills");
     let skill_file = package_dir.join("install-test-skill.skill");
 
-    skill_builder()
-        .args([
-            "install",
-            "install-test-skill",
-            "--file",
-            &skill_file.to_string_lossy(),
-            "--install-dir",
-            &install_dir.to_string_lossy(),
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Successfully installed"));
+    sb().args([
+        "install",
+        "install-test-skill",
+        "--file",
+        &skill_file.to_string_lossy(),
+        "--install-dir",
+        &install_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("Successfully installed"));
 
     // Verify installation
     assert!(install_dir.join("install-test-skill/SKILL.md").exists());
@@ -275,8 +256,7 @@ fn test_install_from_file() {
 
 #[test]
 fn test_repo_help() {
-    skill_builder()
-        .args(["repo", "--help"])
+    sb().args(["repo", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("S3-compatible hosted repository"));
@@ -284,8 +264,7 @@ fn test_repo_help() {
 
 #[test]
 fn test_repo_upload_help() {
-    skill_builder()
-        .args(["repo", "upload", "--help"])
+    sb().args(["repo", "upload", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Upload"));
@@ -293,8 +272,7 @@ fn test_repo_upload_help() {
 
 #[test]
 fn test_repo_download_help() {
-    skill_builder()
-        .args(["repo", "download", "--help"])
+    sb().args(["repo", "download", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Download"));
@@ -302,8 +280,7 @@ fn test_repo_download_help() {
 
 #[test]
 fn test_repo_install_help() {
-    skill_builder()
-        .args(["repo", "install", "--help"])
+    sb().args(["repo", "install", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Install"));
@@ -311,8 +288,7 @@ fn test_repo_install_help() {
 
 #[test]
 fn test_repo_delete_help() {
-    skill_builder()
-        .args(["repo", "delete", "--help"])
+    sb().args(["repo", "delete", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Delete"));
@@ -320,57 +296,59 @@ fn test_repo_delete_help() {
 
 #[test]
 fn test_repo_list_help() {
-    skill_builder()
-        .args(["repo", "list", "--help"])
+    sb().args(["repo", "list", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("List"));
 }
 
 #[test]
-fn test_cache_help() {
-    skill_builder()
-        .args(["cache", "--help"])
+fn test_init_help() {
+    sb().args(["init", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("local skill cache"));
+        .stdout(predicate::str::contains("Initialize"));
 }
 
 #[test]
-fn test_cache_list_help() {
-    skill_builder()
-        .args(["cache", "list", "--help"])
+fn test_local_help() {
+    sb().args(["local", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("local skill repository"));
+}
+
+#[test]
+fn test_local_list_help() {
+    sb().args(["local", "list", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("List"));
 }
 
 #[test]
-fn test_cache_clear_help() {
-    skill_builder()
-        .args(["cache", "clear", "--help"])
+fn test_local_clear_help() {
+    sb().args(["local", "clear", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Clear"));
 }
 
 #[test]
-fn test_cache_list_runs() {
-    skill_builder().args(["cache", "list"]).assert().success();
+fn test_local_list_runs() {
+    sb().args(["local", "list"]).assert().success();
 }
 
 #[test]
 fn test_error_messages_are_user_friendly() {
     // Missing config file should give clear error
-    skill_builder()
-        .args(["--config", "nonexistent.json", "list"])
+    sb().args(["--config", "nonexistent.json", "list"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Failed to read config file"));
 
     // Invalid skill should give clear error
-    skill_builder()
-        .args(["validate", "/does/not/exist"])
+    sb().args(["validate", "/does/not/exist"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));

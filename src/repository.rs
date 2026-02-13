@@ -1,24 +1,35 @@
-//! Repository operations orchestrating S3, cache, and index.
+//! Repository operations orchestrating S3, local storage, and index.
 
 use anyhow::{Context, Result};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::cache::SkillCache;
 use crate::index::{load_index, save_index, SkillsIndex};
 use crate::install::install_from_file;
-use crate::s3::S3Operations;
+use crate::local_storage::LocalStorageClient;
+use crate::storage::StorageOperations;
 
-/// Repository managing skills in S3 with local caching.
-pub struct Repository<S: S3Operations> {
+/// Repository managing skills in S3 with optional local cache.
+pub struct Repository<S: StorageOperations> {
     client: S,
-    cache: SkillCache,
+    local_cache: Option<LocalStorageClient>,
 }
 
-impl<S: S3Operations> Repository<S> {
-    /// Create a new repository.
-    pub fn new(client: S, cache: SkillCache) -> Self {
-        Self { client, cache }
+impl<S: StorageOperations> Repository<S> {
+    /// Create a new repository without a local cache.
+    pub fn new(client: S) -> Self {
+        Self {
+            client,
+            local_cache: None,
+        }
+    }
+
+    /// Create a new repository with a local cache layer.
+    pub fn new_with_cache(client: S, local_cache: LocalStorageClient) -> Self {
+        Self {
+            client,
+            local_cache: Some(local_cache),
+        }
     }
 
     /// Upload a skill to the repository.
@@ -69,7 +80,7 @@ impl<S: S3Operations> Repository<S> {
         Ok(())
     }
 
-    /// Download a skill, using cache when available. Returns path to the cached file.
+    /// Download a skill, using local cache when available. Returns path to the file.
     pub fn download(
         &self,
         name: &str,
@@ -85,16 +96,14 @@ impl<S: S3Operations> Repository<S> {
                 .to_string(),
         };
 
-        // Check cache first
-        if let Some(cached_path) = self.cache.get(name, &resolved_version) {
-            println!("Using cached version: {}", cached_path.display());
-            if let Some(out_dir) = output_dir {
-                let dest = out_dir.join(format!("{}.skill", name));
-                std::fs::create_dir_all(out_dir)?;
-                std::fs::copy(&cached_path, &dest)?;
-                return Ok(dest);
+        // Check local cache first
+        if let Some(ref cache) = self.local_cache {
+            let cache_key = format!("skills/{}/{}/{}.skill", name, resolved_version, name);
+            if cache.object_exists(&cache_key).unwrap_or(false) {
+                println!("Using cached version: {} v{}", name, resolved_version);
+                let data = cache.get_object(&cache_key)?;
+                return write_output(name, &data, output_dir);
             }
-            return Ok(cached_path);
         }
 
         // Find S3 path from index
@@ -108,23 +117,17 @@ impl<S: S3Operations> Repository<S> {
             )
         })?;
 
-        // Download from S3
+        // Download from primary storage
         println!("Downloading {} v{}...", name, resolved_version);
         let data = self.client.get_object(s3_path)?;
 
-        // Cache it
-        let cached_path =
-            self.cache
-                .store(name, &resolved_version, &data, &format!("s3://{}", s3_path))?;
-
-        if let Some(out_dir) = output_dir {
-            let dest = out_dir.join(format!("{}.skill", name));
-            std::fs::create_dir_all(out_dir)?;
-            std::fs::copy(&cached_path, &dest)?;
-            return Ok(dest);
+        // Store in local cache
+        if let Some(ref cache) = self.local_cache {
+            let cache_key = format!("skills/{}/{}/{}.skill", name, resolved_version, name);
+            cache.put_object(&cache_key, &data).ok();
         }
 
-        Ok(cached_path)
+        write_output(name, &data, output_dir)
     }
 
     /// Download and install a skill.
@@ -172,10 +175,18 @@ impl<S: S3Operations> Repository<S> {
         save_index(&self.client, &index)?;
 
         // Clear local cache
-        if let Some(ver) = version {
-            self.cache.remove(name, ver).ok();
-        } else {
-            self.cache.remove_all(name).ok();
+        if let Some(ref cache) = self.local_cache {
+            if let Some(ver) = version {
+                let cache_key = format!("skills/{}/{}/{}.skill", name, ver, name);
+                cache.delete_object(&cache_key).ok();
+            } else {
+                let prefix = format!("skills/{}/", name);
+                if let Ok(keys) = cache.list_objects(&prefix) {
+                    for key in keys {
+                        cache.delete_object(&key).ok();
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -194,6 +205,22 @@ impl<S: S3Operations> Repository<S> {
         } else {
             Ok(index)
         }
+    }
+}
+
+/// Write skill data to output directory or a temp file.
+fn write_output(name: &str, data: &[u8], output_dir: Option<&Path>) -> Result<PathBuf> {
+    if let Some(out_dir) = output_dir {
+        let dest = out_dir.join(format!("{}.skill", name));
+        std::fs::create_dir_all(out_dir)?;
+        std::fs::write(&dest, data)?;
+        Ok(dest)
+    } else {
+        let tmp_dir = std::env::temp_dir().join("skill-builder");
+        std::fs::create_dir_all(&tmp_dir)?;
+        let dest = tmp_dir.join(format!("{}.skill", name));
+        std::fs::write(&dest, data)?;
+        Ok(dest)
     }
 }
 
@@ -249,9 +276,16 @@ mod tests {
 
     fn setup() -> (Repository<MockS3Client>, TempDir) {
         let tmp = TempDir::new().unwrap();
-        let cache = SkillCache::with_dir(tmp.path().join("cache"));
         let client = MockS3Client::new();
-        let repo = Repository::new(client, cache);
+        let repo = Repository::new(client);
+        (repo, tmp)
+    }
+
+    fn setup_with_cache() -> (Repository<MockS3Client>, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let cache = LocalStorageClient::new(tmp.path().join("cache").as_path()).unwrap();
+        let client = MockS3Client::new();
+        let repo = Repository::new_with_cache(client, cache);
         (repo, tmp)
     }
 
@@ -321,7 +355,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_download_uses_cache() {
-        let (repo, tmp) = setup();
+        let (repo, tmp) = setup_with_cache();
         let skill_file = create_test_skill(tmp.path());
 
         repo.upload(
@@ -339,7 +373,8 @@ description: A test skill for repository testing with enough characters to pass 
         let path1 = repo.download("test-skill", Some("1.0.0"), None).unwrap();
         // Second download should use cache
         let path2 = repo.download("test-skill", Some("1.0.0"), None).unwrap();
-        assert_eq!(path1, path2);
+        assert!(path1.exists());
+        assert!(path2.exists());
     }
 
     #[test]
@@ -466,8 +501,6 @@ description: A test skill for repository testing with enough characters to pass 
         // Download without specifying version should get latest
         let path = repo.download("test-skill", None, None).unwrap();
         assert!(path.exists());
-        // Should have cached as 2.0.0
-        assert!(path.to_string_lossy().contains("2.0.0"));
     }
 
     #[test]

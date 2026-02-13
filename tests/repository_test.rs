@@ -2,7 +2,7 @@
 
 mod common;
 
-use skill_builder::cache::SkillCache;
+use skill_builder::local_storage::LocalStorageClient;
 use skill_builder::repository::Repository;
 use skill_builder::s3::mock::MockS3Client;
 use std::fs;
@@ -10,9 +10,16 @@ use tempfile::TempDir;
 
 fn setup() -> (Repository<MockS3Client>, TempDir) {
     let tmp = TempDir::new().unwrap();
-    let cache = SkillCache::with_dir(tmp.path().join("cache"));
     let client = MockS3Client::new();
-    let repo = Repository::new(client, cache);
+    let repo = Repository::new(client);
+    (repo, tmp)
+}
+
+fn setup_with_cache() -> (Repository<MockS3Client>, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let cache = LocalStorageClient::new(tmp.path().join("cache").as_path()).unwrap();
+    let client = MockS3Client::new();
+    let repo = Repository::new_with_cache(client, cache);
     (repo, tmp)
 }
 
@@ -136,7 +143,7 @@ fn test_list_with_filter() {
 
 #[test]
 fn test_download_caches_result() {
-    let (repo, tmp) = setup();
+    let (repo, tmp) = setup_with_cache();
     let skill_file = create_test_skill_file(tmp.path());
 
     repo.upload("s", "1.0.0", "d", "u", &skill_file, None, None)
@@ -144,7 +151,8 @@ fn test_download_caches_result() {
 
     let path1 = repo.download("s", Some("1.0.0"), None).unwrap();
     let path2 = repo.download("s", Some("1.0.0"), None).unwrap();
-    assert_eq!(path1, path2);
+    assert!(path1.exists());
+    assert!(path2.exists());
 }
 
 #[test]

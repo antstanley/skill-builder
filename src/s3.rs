@@ -6,15 +6,7 @@ use s3::region::Region;
 use s3::Bucket;
 
 use crate::config::RepositoryConfig;
-
-/// Trait for S3 operations, enabling mock implementations for testing.
-pub trait S3Operations {
-    fn put_object(&self, key: &str, data: &[u8]) -> Result<()>;
-    fn get_object(&self, key: &str) -> Result<Vec<u8>>;
-    fn delete_object(&self, key: &str) -> Result<()>;
-    fn list_objects(&self, prefix: &str) -> Result<Vec<String>>;
-    fn object_exists(&self, key: &str) -> Result<bool>;
-}
+use crate::storage::StorageOperations;
 
 /// S3 client wrapping the rust-s3 Bucket with a synchronous interface.
 pub struct S3Client {
@@ -50,7 +42,7 @@ impl S3Client {
     }
 }
 
-impl S3Operations for S3Client {
+impl StorageOperations for S3Client {
     fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let response = self
             .runtime
@@ -151,7 +143,7 @@ pub mod mock {
         }
     }
 
-    impl S3Operations for MockS3Client {
+    impl StorageOperations for MockS3Client {
         fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
             self.store
                 .borrow_mut()

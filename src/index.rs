@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::s3::S3Operations;
+use crate::storage::StorageOperations;
 
 const INDEX_KEY: &str = "skills_index.json";
 
@@ -139,7 +139,7 @@ fn compare_semver(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 /// Load the skills index from S3. Returns an empty index if not found.
-pub fn load_index<S: S3Operations>(client: &S) -> Result<SkillsIndex> {
+pub fn load_index<S: StorageOperations>(client: &S) -> Result<SkillsIndex> {
     match client.get_object(INDEX_KEY) {
         Ok(data) => {
             let json = String::from_utf8(data).context("Skills index is not valid UTF-8")?;
@@ -150,7 +150,7 @@ pub fn load_index<S: S3Operations>(client: &S) -> Result<SkillsIndex> {
 }
 
 /// Save the skills index to S3.
-pub fn save_index<S: S3Operations>(client: &S, index: &SkillsIndex) -> Result<()> {
+pub fn save_index<S: StorageOperations>(client: &S, index: &SkillsIndex) -> Result<()> {
     let json = serde_json::to_string_pretty(index).context("Failed to serialize skills index")?;
     client.put_object(INDEX_KEY, json.as_bytes())
 }

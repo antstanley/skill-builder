@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/antstanley/skill-builder"
 
 [[bin]]
-name = "skill-builder"
+name = "sb"
 path = "src/main.rs"
 
 [dependencies]
@@ -21,6 +21,7 @@ anyhow = "1"
 url = "2"
 rust-s3 = "0.35"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+dialoguer = "0.11"
 dirs = "6"
 chrono = { version = "0.4", features = ["serde"] }
 

@@ -37,7 +37,13 @@ Download the latest binary for your platform from the [releases page](https://gi
 
 ## Quick Start
 
-1. **Add a skill to `skills.json`:**
+1. **Initialize global config:**
+
+```bash
+sb init
+```
+
+2. **Add a skill to `skills.json`:**
 
 ```json
 {
@@ -51,82 +57,102 @@ Download the latest binary for your platform from the [releases page](https://gi
 }
 ```
 
-2. **Download the documentation:**
+3. **Download the documentation:**
 
 ```bash
-skill-builder download my-library
+sb download my-library
 ```
 
-3. **Create/update the skill in `skills/my-library/`** with a `SKILL.md` and `references/` directory.
+4. **Create/update the skill in `skills/my-library/`** with a `SKILL.md` and `references/` directory.
 
-4. **Validate and package:**
+5. **Validate and package:**
 
 ```bash
-skill-builder validate my-library
-skill-builder package my-library --output dist/
+sb validate my-library
+sb package my-library --output dist/
 ```
 
 ## CLI Reference
+
+### Initialize Global Config
+
+```bash
+sb init
+```
+
+Creates a configuration file at `$HOME/.skill-builder/skills.config.json` with options for setting up a local skill repository.
 
 ### Download Documentation
 
 ```bash
 # Download docs for a skill defined in skills.json
-skill-builder download shadcn-svelte
+sb download shadcn-svelte
 
 # Download all skills
-skill-builder download --all
+sb download --all
 
 # Download from URL directly (no config needed)
-skill-builder download --url https://example.com/llms.txt --name my-skill
+sb download --url https://example.com/llms.txt --name my-skill
 
 # Specify source directory
-skill-builder download shadcn-svelte --source-dir ./source
+sb download shadcn-svelte --source-dir ./source
 ```
 
 ### Validate a Skill
 
 ```bash
 # Validate by name (looks in skills/ directory)
-skill-builder validate shadcn-svelte
+sb validate shadcn-svelte
 
 # Validate by path
-skill-builder validate ./skills/shadcn-svelte
+sb validate ./skills/shadcn-svelte
 
 # Specify skills directory
-skill-builder validate my-skill --skills-dir ./custom-skills
+sb validate my-skill --skills-dir ./custom-skills
 ```
 
 ### Package a Skill
 
 ```bash
 # Package to dist/ directory
-skill-builder package shadcn-svelte
+sb package shadcn-svelte
 
 # Specify output directory
-skill-builder package shadcn-svelte --output ./releases
+sb package shadcn-svelte --output ./releases
 ```
 
 ### Install a Skill
 
+By default, `sb install` searches local repo, remote repo, then GitHub releases in order.
+
 ```bash
-# Install latest version from GitHub releases
-skill-builder install shadcn-svelte
+# Install (cascades: local → remote → GitHub)
+sb install shadcn-svelte
 
 # Install specific version
-skill-builder install shadcn-svelte --version 1.0.0
+sb install shadcn-svelte --version 1.0.0
+
+# Install from local repository only
+sb install shadcn-svelte --local
+
+# Install from remote S3 repository only
+sb install shadcn-svelte --remote
+
+# Install from GitHub releases only
+sb install shadcn-svelte --github
+sb install shadcn-svelte --github --repo user/repo
 
 # Install from local .skill file
-skill-builder install shadcn-svelte --file ./dist/shadcn-svelte.skill
+sb install shadcn-svelte --file ./dist/shadcn-svelte.skill
 
 # Specify installation directory
-skill-builder install shadcn-svelte --install-dir ~/.claude/skills
+sb install shadcn-svelte --install-dir ~/.claude/skills
 ```
 
 ### List Configured Skills
 
 ```bash
-skill-builder list
+sb list
 ```
 
 ### Skill Repository (S3-Compatible)
@@ -135,48 +161,55 @@ Manage skills in an S3-compatible hosted repository with local caching.
 
 ```bash
 # Upload a skill to the repository
-skill-builder repo upload my-skill 1.0.0
-skill-builder repo upload my-skill 1.0.0 --file ./dist/my-skill.skill --changelog CHANGELOG.md --source-dir ./source
+sb repo upload my-skill 1.0.0
+sb repo upload my-skill 1.0.0 --file ./dist/my-skill.skill --changelog CHANGELOG.md --source-dir ./source
 
 # Download a skill from the repository
-skill-builder repo download my-skill
-skill-builder repo download my-skill --version 1.0.0 --output ./downloads
+sb repo download my-skill
+sb repo download my-skill --version 1.0.0 --output ./downloads
 
 # Install a skill directly from the repository
-skill-builder repo install my-skill
-skill-builder repo install my-skill --version 1.0.0 --install-dir .claude/skills
+sb repo install my-skill
+sb repo install my-skill --version 1.0.0 --install-dir .claude/skills
 
 # Delete a skill from the repository
-skill-builder repo delete my-skill --yes
-skill-builder repo delete my-skill --version 1.0.0 --yes
+sb repo delete my-skill --yes
+sb repo delete my-skill --version 1.0.0 --yes
 
 # List skills in the repository
-skill-builder repo list
-skill-builder repo list --skill my-skill
+sb repo list
+sb repo list --skill my-skill
 ```
 
-### Local Cache
+### Local Repository
 
-Downloaded skills are cached locally for faster subsequent access.
+Skills can be stored locally for offline access or as a cache for the remote repository.
 
 ```bash
-# List cached skills
-skill-builder cache list
+# List locally stored skills
+sb local list
 
-# Clear all cached skills
-skill-builder cache clear
+# Clear all locally stored skills
+sb local clear
 
-# Clear cache for a specific skill
-skill-builder cache clear --skill my-skill
+# Clear a specific skill
+sb local clear --skill my-skill
 ```
 
-Cache location:
-- **Linux:** `~/.cache/skill-builder/skills/`
-- **macOS:** `~/Library/Caches/skill-builder/skills/`
+Default local repository location: `$HOME/.skill-builder/local/`
 
 ## Configuration
 
-The `skills.json` file defines available skills and optional repository settings:
+### Config Fallback Hierarchy
+
+`sb` loads configuration in this order (first found wins):
+
+1. CLI `--config` flag (explicit path)
+2. Project-local `skills.json` (if exists in current directory)
+3. Global config at `$HOME/.skill-builder/skills.config.json`
+4. Built-in defaults (empty config)
+
+### Config Format
 
 ```json
 {
@@ -191,6 +224,10 @@ The `skills.json` file defines available skills and optional repository settings
   ],
   "repository": {
     "name": "my-skill-repo",
+    "local": {
+      "path": null,
+      "cache": false
+    },
     "bucket_name": "my-skills-bucket",
     "region": "us-east-1",
     "endpoint": "https://s3.example.com"
@@ -210,11 +247,13 @@ The `skills.json` file defines available skills and optional repository settings
 
 ### Repository Fields
 
-The `repository` section is optional. When present, it enables the `repo` subcommands.
+The `repository` section is optional. When present, it enables the `repo` and `local` subcommands.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | No | Display name for the repository |
+| `local.path` | No | Local repository path (default: `$HOME/.skill-builder/local/`) |
+| `local.cache` | No | Use local repo as cache for remote (default: `false`) |
 | `bucket_name` | Yes (for repo commands) | S3 bucket name |
 | `region` | No | AWS region (default: `us-east-1`) |
 | `endpoint` | No | Custom endpoint for S3-compatible providers (MinIO, R2, etc.) |
@@ -251,14 +290,17 @@ skill-builder/
 ├── src/
 │   ├── main.rs             # CLI entry point
 │   ├── lib.rs              # Library root
-│   ├── config.rs           # Configuration parsing
+│   ├── config.rs           # Configuration parsing with fallback
 │   ├── download.rs         # Document downloading
 │   ├── validate.rs         # Skill validation
 │   ├── package.rs          # Skill packaging
-│   ├── install.rs          # Skill installation
+│   ├── install.rs          # Skill installation (GitHub)
+│   ├── install_resolver.rs # Multi-source install resolution
+│   ├── init.rs             # Interactive init command
 │   ├── s3.rs               # S3-compatible storage client
+│   ├── storage.rs          # StorageOperations trait
+│   ├── local_storage.rs    # Filesystem storage backend
 │   ├── index.rs            # Skills index management
-│   ├── cache.rs            # Local skill caching
 │   └── repository.rs       # Repository operations
 └── tests/                  # Integration tests
 ```
