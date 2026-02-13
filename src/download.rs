@@ -15,8 +15,8 @@ use crate::output::Output;
 /// HTTP client with reasonable defaults.
 fn create_client() -> Result<Client> {
     Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent("skill-builder/1.0")
+        .timeout(Duration::from_secs(60))
+        .user_agent("sb/1.0")
         .build()
         .context("Failed to create HTTP client")
 }

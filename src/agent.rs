@@ -11,6 +11,14 @@ pub enum AgentFramework {
     Kiro,
 }
 
+/// All supported agent frameworks.
+pub const ALL_FRAMEWORKS: &[AgentFramework] = &[
+    AgentFramework::Claude,
+    AgentFramework::OpenCode,
+    AgentFramework::Codex,
+    AgentFramework::Kiro,
+];
+
 impl AgentFramework {
     /// Display name for the agent.
     pub fn name(&self) -> &'static str {
@@ -42,6 +50,36 @@ impl AgentFramework {
             Self::Kiro => home.join(".kiro/skills"),
         }
     }
+
+    /// Directory markers that indicate this agent is configured in a project.
+    fn project_dir_markers(&self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &[".claude"],
+            Self::OpenCode => &[".opencode"],
+            Self::Codex => &[".codex"],
+            Self::Kiro => &[".kiro"],
+        }
+    }
+
+    /// File markers that indicate this agent is configured in a project.
+    fn project_file_markers(&self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &["CLAUDE.md"],
+            Self::OpenCode => &["opencode.json"],
+            Self::Codex => &["AGENTS.md"],
+            Self::Kiro => &[],
+        }
+    }
+
+    /// Directory markers for global detection (relative to home).
+    fn global_dir_markers(&self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &[".claude"],
+            Self::OpenCode => &[".config/opencode"],
+            Self::Codex => &[".codex"],
+            Self::Kiro => &[".kiro"],
+        }
+    }
 }
 
 /// Target specification for agent installation.
@@ -70,29 +108,21 @@ pub fn parse_agent_flag(value: Option<&str>) -> anyhow::Result<AgentTarget> {
 
 /// Detect which agent frameworks are configured in a project directory.
 pub fn detect_project_agents(project_root: &Path) -> Vec<AgentFramework> {
-    let mut agents = Vec::new();
+    let mut agents: Vec<AgentFramework> = ALL_FRAMEWORKS
+        .iter()
+        .copied()
+        .filter(|agent| {
+            agent
+                .project_dir_markers()
+                .iter()
+                .any(|d| project_root.join(d).is_dir())
+                || agent
+                    .project_file_markers()
+                    .iter()
+                    .any(|f| project_root.join(f).exists())
+        })
+        .collect();
 
-    // Claude: .claude/ dir OR CLAUDE.md
-    if project_root.join(".claude").is_dir() || project_root.join("CLAUDE.md").exists() {
-        agents.push(AgentFramework::Claude);
-    }
-
-    // OpenCode: .opencode/ dir OR opencode.json
-    if project_root.join(".opencode").is_dir() || project_root.join("opencode.json").exists() {
-        agents.push(AgentFramework::OpenCode);
-    }
-
-    // Codex: .codex/ dir OR AGENTS.md
-    if project_root.join(".codex").is_dir() || project_root.join("AGENTS.md").exists() {
-        agents.push(AgentFramework::Codex);
-    }
-
-    // Kiro: .kiro/ dir
-    if project_root.join(".kiro").is_dir() {
-        agents.push(AgentFramework::Kiro);
-    }
-
-    // Default to Claude if nothing detected
     if agents.is_empty() {
         agents.push(AgentFramework::Claude);
     }
@@ -103,20 +133,16 @@ pub fn detect_project_agents(project_root: &Path) -> Vec<AgentFramework> {
 /// Detect which agent frameworks are configured globally.
 pub fn detect_global_agents() -> Vec<AgentFramework> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let mut agents = Vec::new();
-
-    if home.join(".claude").is_dir() {
-        agents.push(AgentFramework::Claude);
-    }
-    if home.join(".config/opencode").is_dir() {
-        agents.push(AgentFramework::OpenCode);
-    }
-    if home.join(".codex").is_dir() {
-        agents.push(AgentFramework::Codex);
-    }
-    if home.join(".kiro").is_dir() {
-        agents.push(AgentFramework::Kiro);
-    }
+    let mut agents: Vec<AgentFramework> = ALL_FRAMEWORKS
+        .iter()
+        .copied()
+        .filter(|agent| {
+            agent
+                .global_dir_markers()
+                .iter()
+                .any(|d| home.join(d).is_dir())
+        })
+        .collect();
 
     if agents.is_empty() {
         agents.push(AgentFramework::Claude);
@@ -130,12 +156,13 @@ pub fn detect_global_agents() -> Vec<AgentFramework> {
 /// Priority:
 /// 1. If `explicit_dir` is Some, return just that path (overrides everything)
 /// 2. If target is Specific, return that agent's dir
-/// 3. If target is All, return all 3 agent dirs
+/// 3. If target is All, return all supported agent dirs
 /// 4. If target is Auto, detect agents and return dirs for all detected
 pub fn resolve_install_dirs(
     target: &AgentTarget,
     explicit_dir: Option<&Path>,
     global: bool,
+    project_root: &Path,
 ) -> Vec<PathBuf> {
     // Explicit dir overrides everything
     if let Some(dir) = explicit_dir {
@@ -152,17 +179,12 @@ pub fn resolve_install_dirs(
 
     match target {
         AgentTarget::Specific(agent) => vec![agent_to_dir(agent)],
-        AgentTarget::All => vec![
-            agent_to_dir(&AgentFramework::Claude),
-            agent_to_dir(&AgentFramework::OpenCode),
-            agent_to_dir(&AgentFramework::Codex),
-            agent_to_dir(&AgentFramework::Kiro),
-        ],
+        AgentTarget::All => ALL_FRAMEWORKS.iter().map(agent_to_dir).collect(),
         AgentTarget::Auto => {
             let agents = if global {
                 detect_global_agents()
             } else {
-                detect_project_agents(Path::new("."))
+                detect_project_agents(project_root)
             };
             agents.iter().map(agent_to_dir).collect()
         }
@@ -308,36 +330,52 @@ mod tests {
     #[test]
     fn test_resolve_explicit_dir_overrides() {
         let explicit = PathBuf::from("/custom/path");
-        let dirs = resolve_install_dirs(&AgentTarget::All, Some(&explicit), false);
+        let dirs = resolve_install_dirs(&AgentTarget::All, Some(&explicit), false, Path::new("."));
         assert_eq!(dirs, vec![PathBuf::from("/custom/path")]);
     }
 
     #[test]
     fn test_resolve_specific_agent() {
-        let dirs =
-            resolve_install_dirs(&AgentTarget::Specific(AgentFramework::Claude), None, false);
+        let p = Path::new(".");
+        let dirs = resolve_install_dirs(
+            &AgentTarget::Specific(AgentFramework::Claude),
+            None,
+            false,
+            p,
+        );
         assert_eq!(dirs, vec![PathBuf::from(".claude/skills")]);
 
         let dirs = resolve_install_dirs(
             &AgentTarget::Specific(AgentFramework::OpenCode),
             None,
             false,
+            p,
         );
         assert_eq!(dirs, vec![PathBuf::from(".opencode/skills")]);
 
-        let dirs = resolve_install_dirs(&AgentTarget::Specific(AgentFramework::Codex), None, false);
+        let dirs = resolve_install_dirs(
+            &AgentTarget::Specific(AgentFramework::Codex),
+            None,
+            false,
+            p,
+        );
         assert_eq!(dirs, vec![PathBuf::from(".agents/skills")]);
     }
 
     #[test]
     fn test_resolve_specific_kiro() {
-        let dirs = resolve_install_dirs(&AgentTarget::Specific(AgentFramework::Kiro), None, false);
+        let dirs = resolve_install_dirs(
+            &AgentTarget::Specific(AgentFramework::Kiro),
+            None,
+            false,
+            Path::new("."),
+        );
         assert_eq!(dirs, vec![PathBuf::from(".kiro/skills")]);
     }
 
     #[test]
     fn test_resolve_all_agents() {
-        let dirs = resolve_install_dirs(&AgentTarget::All, None, false);
+        let dirs = resolve_install_dirs(&AgentTarget::All, None, false, Path::new("."));
         assert_eq!(dirs.len(), 4);
         assert_eq!(dirs[0], PathBuf::from(".claude/skills"));
         assert_eq!(dirs[1], PathBuf::from(".opencode/skills"));

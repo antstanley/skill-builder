@@ -110,13 +110,18 @@ fn test_resolve_auto_with_markers() {
 
     // Auto detection happens in resolve_install_dirs using cwd,
     // so we test the specific and all targets directly
-    let dirs = resolve_install_dirs(&AgentTarget::All, None, false);
+    let dirs = resolve_install_dirs(&AgentTarget::All, None, false, std::path::Path::new("."));
     assert_eq!(dirs.len(), 4);
 }
 
 #[test]
 fn test_resolve_global_dirs() {
-    let dirs = resolve_install_dirs(&AgentTarget::Specific(AgentFramework::Claude), None, true);
+    let dirs = resolve_install_dirs(
+        &AgentTarget::Specific(AgentFramework::Claude),
+        None,
+        true,
+        std::path::Path::new("."),
+    );
     assert_eq!(dirs.len(), 1);
     let dir_str = dirs[0].to_string_lossy();
     assert!(
@@ -128,14 +133,19 @@ fn test_resolve_global_dirs() {
 
 #[test]
 fn test_resolve_global_all_dirs() {
-    let dirs = resolve_install_dirs(&AgentTarget::All, None, true);
+    let dirs = resolve_install_dirs(&AgentTarget::All, None, true, std::path::Path::new("."));
     assert_eq!(dirs.len(), 4);
 }
 
 #[test]
 fn test_explicit_dir_overrides_everything() {
     let custom = std::path::PathBuf::from("/my/custom/dir");
-    let dirs = resolve_install_dirs(&AgentTarget::All, Some(&custom), true);
+    let dirs = resolve_install_dirs(
+        &AgentTarget::All,
+        Some(&custom),
+        true,
+        std::path::Path::new("."),
+    );
     assert_eq!(dirs.len(), 1);
     assert_eq!(dirs[0], custom);
 }

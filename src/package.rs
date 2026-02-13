@@ -78,21 +78,20 @@ pub struct PackageResult {
     pub validation: ValidationResult,
 }
 
-/// Package a skill directory into a .skill file.
-///
-/// If `output` is None, packaging runs silently (used internally by tests).
+/// Package a skill directory into a .skill file (silent output for internal use).
 pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
 ) -> Result<PackageResult> {
-    package_skill_with_output(skill_path, output_dir, None)
+    let silent = Output::new(true);
+    package_skill_with_output(skill_path, output_dir, &silent)
 }
 
 /// Package a skill directory into a .skill file with output.
 pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
-    output: Option<&Output>,
+    output: &Output,
 ) -> Result<PackageResult> {
     let skill_path = skill_path.as_ref();
     let output_dir = output_dir.as_ref();
@@ -103,29 +102,23 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
         .context("Invalid skill path")?
         .to_string_lossy();
 
-    if let Some(out) = output {
-        out.header(&format!("Packaging skill: {}", skill_path.display()));
-        out.step(&format!("Output directory: {}", output_dir.display()));
-        out.newline();
-    }
+    output.header(&format!("Packaging skill: {}", skill_path.display()));
+    output.step(&format!("Output directory: {}", output_dir.display()));
+    output.newline();
 
     // Validate first
     let validation = validate_skill(skill_path);
 
     if !validation.valid {
-        if let Some(out) = output {
-            out.error("Validation failed:");
-            for error in &validation.errors {
-                out.step(&format!("- {}", error));
-            }
+        output.error("Validation failed:");
+        for error in &validation.errors {
+            output.step(&format!("- {}", error));
         }
         anyhow::bail!("Skill validation failed");
     }
 
-    if let Some(out) = output {
-        out.status("Valid", "Skill is valid!");
-        out.newline();
-    }
+    output.status("Valid", "Skill is valid!");
+    output.newline();
 
     // Create output directory
     fs::create_dir_all(output_dir)?;
@@ -143,7 +136,7 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
         .unix_permissions(0o644);
 
     // Add files to archive
-    let progress = output.map(|out| out.progress_bar(files.len() as u64, "Adding files"));
+    let progress = output.progress_bar(files.len() as u64, "Adding files");
 
     for file_path in &files {
         let relative_path = file_path.strip_prefix(skill_path)?;
@@ -156,20 +149,13 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
         f.read_to_end(&mut buffer)?;
         zip.write_all(&buffer)?;
 
-        if let Some(ref pb) = progress {
-            pb.inc(1);
-        }
+        progress.inc(1);
     }
 
-    if let Some(pb) = progress {
-        pb.finish_and_clear();
-    }
-
+    progress.finish_and_clear();
     zip.finish()?;
 
-    if let Some(out) = output {
-        out.status("Packaged", &format!("{}", output_path.display()));
-    }
+    output.status("Packaged", &format!("{}", output_path.display()));
 
     Ok(PackageResult {
         output_path,

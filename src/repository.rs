@@ -4,11 +4,24 @@ use anyhow::{Context, Result};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::config::RepositoryConfig;
 use crate::index::{load_index, save_index, SkillsIndex};
 use crate::install::install_from_file;
 use crate::local_storage::LocalStorageClient;
 use crate::output::Output;
+use crate::s3::S3Client;
 use crate::storage::StorageOperations;
+
+/// Parameters for uploading a skill to the repository.
+pub struct UploadParams<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub description: &'a str,
+    pub llms_txt_url: &'a str,
+    pub skill_file: &'a Path,
+    pub changelog: Option<&'a Path>,
+    pub source_dir: Option<&'a Path>,
+}
 
 /// Repository managing skills in S3 with optional local cache.
 pub struct Repository<S: StorageOperations> {
@@ -32,52 +45,70 @@ impl<S: StorageOperations> Repository<S> {
             local_cache: Some(local_cache),
         }
     }
+}
 
+impl Repository<S3Client> {
+    /// Create a repository from config, with optional local cache.
+    pub fn from_config(repo_config: &RepositoryConfig) -> Result<Self> {
+        let client = S3Client::new(repo_config)?;
+        if repo_config.local_is_cache() {
+            let local_path = repo_config.local_repo_path();
+            let local_cache = LocalStorageClient::new(&local_path)?;
+            Ok(Self::new_with_cache(client, local_cache))
+        } else {
+            Ok(Self::new(client))
+        }
+    }
+}
+
+impl<S: StorageOperations> Repository<S> {
     /// Upload a skill to the repository.
-    #[allow(clippy::too_many_arguments)]
-    pub fn upload(
-        &self,
-        name: &str,
-        version: &str,
-        description: &str,
-        llms_txt_url: &str,
-        skill_file: &Path,
-        changelog: Option<&Path>,
-        source_dir: Option<&Path>,
-        output: &Output,
-    ) -> Result<()> {
-        let skill_data = std::fs::read(skill_file)
-            .with_context(|| format!("Failed to read skill file: {}", skill_file.display()))?;
+    pub fn upload(&self, params: &UploadParams, output: &Output) -> Result<()> {
+        let skill_data = std::fs::read(params.skill_file).with_context(|| {
+            format!("Failed to read skill file: {}", params.skill_file.display())
+        })?;
 
         // Upload skill file
-        let skill_key = format!("skills/{}/{}/{}.skill", name, version, name);
+        let skill_key = format!(
+            "skills/{}/{}/{}.skill",
+            params.name, params.version, params.name
+        );
         let pb = output.spinner(&format!("Uploading {}", skill_key));
         self.client.put_object(&skill_key, &skill_data)?;
         pb.finish_and_clear();
         output.step(&format!("Uploaded: {}", skill_key));
 
         // Upload changelog if provided
-        if let Some(changelog_path) = changelog {
+        if let Some(changelog_path) = params.changelog {
             let changelog_data = std::fs::read_to_string(changelog_path).with_context(|| {
                 format!("Failed to read changelog: {}", changelog_path.display())
             })?;
-            let changelog_key = format!("skills/{}/{}/CHANGELOG.md", name, version);
+            let changelog_key = format!("skills/{}/{}/CHANGELOG.md", params.name, params.version);
             self.client
                 .put_object(&changelog_key, changelog_data.as_bytes())?;
             output.step(&format!("Uploaded: {}", changelog_key));
         }
 
         // Upload source archive if provided
-        if let Some(src_dir) = source_dir {
-            let archive = create_source_archive(src_dir, name)?;
-            let source_key = format!("source/{}/{}/{}-source.zip", name, version, name);
+        if let Some(src_dir) = params.source_dir {
+            let archive = create_source_archive(src_dir, params.name)?;
+            let source_key = format!(
+                "source/{}/{}/{}-source.zip",
+                params.name, params.version, params.name
+            );
             self.client.put_object(&source_key, &archive)?;
             output.step(&format!("Uploaded: {}", source_key));
         }
 
         // Update index
         let mut index = load_index(&self.client)?;
-        index.add_or_update_skill(name, description, llms_txt_url, version, &skill_key);
+        index.add_or_update_skill(
+            params.name,
+            params.description,
+            params.llms_txt_url,
+            params.version,
+            &skill_key,
+        );
         save_index(&self.client, &index)?;
         output.step("Updated index");
 
@@ -156,33 +187,30 @@ impl<S: StorageOperations> Repository<S> {
     pub fn delete(&self, name: &str, version: Option<&str>, output: &Output) -> Result<()> {
         let mut index = load_index(&self.client)?;
 
+        let delete_version_keys = |client: &S, n: &str, v: &str, out: &Output| {
+            let keys = [
+                format!("skills/{}/{}/{}.skill", n, v, n),
+                format!("skills/{}/{}/CHANGELOG.md", n, v),
+                format!("source/{}/{}/{}-source.zip", n, v, n),
+            ];
+            for key in &keys {
+                if let Err(e) = client.delete_object(key) {
+                    out.warn(&format!("Failed to delete {}: {}", key, e));
+                }
+            }
+        };
+
         if let Some(ver) = version {
-            // Delete specific version
-            let skill_key = format!("skills/{}/{}/{}.skill", name, ver, name);
-            let changelog_key = format!("skills/{}/{}/CHANGELOG.md", name, ver);
-            let source_key = format!("source/{}/{}/{}-source.zip", name, ver, name);
-
-            self.client.delete_object(&skill_key).ok();
-            self.client.delete_object(&changelog_key).ok();
-            self.client.delete_object(&source_key).ok();
-
+            delete_version_keys(&self.client, name, ver, output);
             index.remove_version(name, ver);
             output.step(&format!("Deleted version {} of {}", ver, name));
         } else {
-            // Delete all versions
             let entry = index.find_skill(name);
             if let Some(entry) = entry {
                 for ver in entry.versions.keys().cloned().collect::<Vec<_>>() {
-                    let skill_key = format!("skills/{}/{}/{}.skill", name, ver, name);
-                    let changelog_key = format!("skills/{}/{}/CHANGELOG.md", name, ver);
-                    let source_key = format!("source/{}/{}/{}-source.zip", name, ver, name);
-
-                    self.client.delete_object(&skill_key).ok();
-                    self.client.delete_object(&changelog_key).ok();
-                    self.client.delete_object(&source_key).ok();
+                    delete_version_keys(&self.client, name, &ver, output);
                 }
             }
-
             index.remove_skill(name);
             output.step(&format!("Deleted all versions of {}", name));
         }
@@ -225,18 +253,14 @@ impl<S: StorageOperations> Repository<S> {
 
 /// Write skill data to output directory or a temp file.
 fn write_output(name: &str, data: &[u8], output_dir: Option<&Path>) -> Result<PathBuf> {
-    if let Some(out_dir) = output_dir {
-        let dest = out_dir.join(format!("{}.skill", name));
-        std::fs::create_dir_all(out_dir)?;
-        std::fs::write(&dest, data)?;
-        Ok(dest)
-    } else {
-        let tmp_dir = std::env::temp_dir().join("skill-builder");
-        std::fs::create_dir_all(&tmp_dir)?;
-        let dest = tmp_dir.join(format!("{}.skill", name));
-        std::fs::write(&dest, data)?;
-        Ok(dest)
-    }
+    let dir = match output_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::temp_dir().join("skill-builder"),
+    };
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("{}.skill", name));
+    std::fs::write(&dest, data)?;
+    Ok(dest)
 }
 
 /// Create a zip archive of a source directory.
@@ -330,23 +354,31 @@ description: A test skill for repository testing with enough characters to pass 
         dist.join("test-skill.skill")
     }
 
+    fn upload_params<'a>(
+        name: &'a str,
+        version: &'a str,
+        skill_file: &'a Path,
+    ) -> UploadParams<'a> {
+        UploadParams {
+            name,
+            version,
+            description: "desc",
+            llms_txt_url: "https://example.com/llms.txt",
+            skill_file,
+            changelog: None,
+            source_dir: None,
+        }
+    }
+
     #[test]
     fn test_upload_and_list() {
         let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "A test skill",
-            "https://example.com/llms.txt",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        let mut params = upload_params("test-skill", "1.0.0", &skill_file);
+        params.description = "A test skill";
+        repo.upload(&params, &out).unwrap();
 
         let index = repo.list(None).unwrap();
         assert_eq!(index.skills.len(), 1);
@@ -360,17 +392,9 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "A test skill",
-            "https://example.com/llms.txt",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        let mut params = upload_params("test-skill", "1.0.0", &skill_file);
+        params.description = "A test skill";
+        repo.upload(&params, &out).unwrap();
 
         let downloaded = repo
             .download("test-skill", Some("1.0.0"), None, &out)
@@ -384,17 +408,8 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup_with_cache();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "A test",
-            "https://example.com/llms.txt",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+            .unwrap();
 
         // First download should cache
         let path1 = repo
@@ -414,17 +429,8 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "A test",
-            "https://example.com/llms.txt",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+            .unwrap();
 
         let output_dir = tmp.path().join("output");
         let path = repo
@@ -440,28 +446,10 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
-        repo.upload(
-            "test-skill",
-            "2.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+            .unwrap();
+        repo.upload(&upload_params("test-skill", "2.0.0", &skill_file), &out)
+            .unwrap();
 
         repo.delete("test-skill", Some("1.0.0"), &out).unwrap();
 
@@ -477,17 +465,8 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+            .unwrap();
 
         repo.delete("test-skill", None, &out).unwrap();
 
@@ -502,24 +481,22 @@ description: A test skill for repository testing with enough characters to pass 
         let skill_file = create_test_skill(tmp.path());
 
         repo.upload(
-            "skill-a",
-            "1.0.0",
-            "a",
-            "url",
-            &skill_file,
-            None,
-            None,
+            &UploadParams {
+                name: "skill-a",
+                description: "a",
+                llms_txt_url: "url",
+                ..upload_params("skill-a", "1.0.0", &skill_file)
+            },
             &out,
         )
         .unwrap();
         repo.upload(
-            "skill-b",
-            "1.0.0",
-            "b",
-            "url",
-            &skill_file,
-            None,
-            None,
+            &UploadParams {
+                name: "skill-b",
+                description: "b",
+                llms_txt_url: "url",
+                ..upload_params("skill-b", "1.0.0", &skill_file)
+            },
             &out,
         )
         .unwrap();
@@ -535,28 +512,10 @@ description: A test skill for repository testing with enough characters to pass 
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload(
-            "test-skill",
-            "1.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
-        repo.upload(
-            "test-skill",
-            "2.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            None,
-            &out,
-        )
-        .unwrap();
+        repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+            .unwrap();
+        repo.upload(&upload_params("test-skill", "2.0.0", &skill_file), &out)
+            .unwrap();
 
         // Download without specifying version should get latest
         let path = repo.download("test-skill", None, None, &out).unwrap();
@@ -573,13 +532,10 @@ description: A test skill for repository testing with enough characters to pass 
         std::fs::write(&changelog, "# Changelog\n\n## 1.0.0\n- Initial release").unwrap();
 
         repo.upload(
-            "test-skill",
-            "1.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            Some(&changelog),
-            None,
+            &UploadParams {
+                changelog: Some(&changelog),
+                ..upload_params("test-skill", "1.0.0", &skill_file)
+            },
             &out,
         )
         .unwrap();
@@ -603,13 +559,10 @@ description: A test skill for repository testing with enough characters to pass 
         std::fs::write(source_dir.join("main.rs"), "fn main() {}").unwrap();
 
         repo.upload(
-            "test-skill",
-            "1.0.0",
-            "desc",
-            "url",
-            &skill_file,
-            None,
-            Some(&source_dir),
+            &UploadParams {
+                source_dir: Some(&source_dir),
+                ..upload_params("test-skill", "1.0.0", &skill_file)
+            },
             &out,
         )
         .unwrap();

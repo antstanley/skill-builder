@@ -8,7 +8,6 @@ use crate::install::{install_from_file, install_skill, InstallResult};
 use crate::local_storage::LocalStorageClient;
 use crate::output::Output;
 use crate::repository::Repository;
-use crate::s3::S3Client;
 
 /// Options controlling install source resolution.
 pub struct InstallOptions<'a> {
@@ -129,14 +128,7 @@ fn install_from_remote(
         anyhow::bail!("No remote repository configured (missing bucket_name)");
     }
 
-    let client = S3Client::new(rc)?;
-    let repo = if rc.local_is_cache() {
-        let local_path = rc.local_repo_path();
-        let local_cache = LocalStorageClient::new(&local_path)?;
-        Repository::new_with_cache(client, local_cache)
-    } else {
-        Repository::new(client)
-    };
+    let repo = Repository::from_config(rc)?;
 
     output.info("Looking in remote repository...");
     repo.install(
@@ -177,6 +169,7 @@ mod tests {
     use super::*;
     use crate::config::{LocalRepositoryConfig, RepositoryConfig};
     use crate::package::package_skill;
+    use crate::repository::UploadParams;
     use tempfile::TempDir;
 
     fn test_output() -> Output {
@@ -208,13 +201,15 @@ description: A test skill for resolver testing with enough characters to pass va
         let client = LocalStorageClient::new(local_path).unwrap();
         let repo = Repository::new(client);
         repo.upload(
-            "resolver-test",
-            "1.0.0",
-            "A test skill",
-            "https://example.com/llms.txt",
-            &package_result.output_path,
-            None,
-            None,
+            &UploadParams {
+                name: "resolver-test",
+                version: "1.0.0",
+                description: "A test skill",
+                llms_txt_url: "https://example.com/llms.txt",
+                skill_file: &package_result.output_path,
+                changelog: None,
+                source_dir: None,
+            },
             &out,
         )
         .unwrap();

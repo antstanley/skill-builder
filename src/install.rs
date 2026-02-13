@@ -49,6 +49,47 @@ pub struct InstallResult {
     pub files_extracted: usize,
 }
 
+/// Extract a zip archive into install_dir, returning (skill_name, skill_path, files_extracted).
+fn extract_archive<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    install_dir: &Path,
+) -> Result<(String, PathBuf, usize)> {
+    fs::create_dir_all(install_dir)?;
+
+    let mut files_extracted = 0;
+    let mut skill_name = String::new();
+    let mut skill_path = install_dir.to_path_buf();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name().to_string();
+
+        if i == 0 {
+            if let Some(first) = PathBuf::from(&name).components().next() {
+                skill_name = first.as_os_str().to_string_lossy().to_string();
+                skill_path = install_dir.join(&skill_name);
+            }
+        }
+
+        let outpath = install_dir.join(&name);
+
+        if file.is_dir() {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = File::create(&outpath)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            outfile.write_all(&buffer)?;
+            files_extracted += 1;
+        }
+    }
+
+    Ok((skill_name, skill_path, files_extracted))
+}
+
 /// Download and extract a skill from GitHub releases.
 pub fn install_skill(
     skill_name: &str,
@@ -59,7 +100,6 @@ pub fn install_skill(
 ) -> Result<InstallResult> {
     let client = create_client()?;
 
-    // Determine installation directory
     let install_dir = install_dir
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from(DEFAULT_INSTALL_DIR));
@@ -71,7 +111,6 @@ pub fn install_skill(
     output.step(&format!("Version: {}", ver_str));
     output.newline();
 
-    // Download the skill file
     let pb = output.spinner(&format!("Downloading from {}", url));
 
     let response = client
@@ -87,50 +126,12 @@ pub fn install_skill(
     let bytes = response.bytes().context("Failed to read response body")?;
     pb.finish_and_clear();
 
-    // Create install directory
-    fs::create_dir_all(&install_dir)?;
-
-    // Extract the skill
     let pb = output.spinner("Extracting skill");
-
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
-
-    let mut files_extracted = 0;
-    let mut skill_path = install_dir.clone();
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let name = file.name().to_string();
-
-        // Determine output path
-        let outpath = install_dir.join(&name);
-
-        // Track the skill root directory
-        if i == 0 {
-            if let Some(first_component) = PathBuf::from(&name).components().next() {
-                skill_path = install_dir.join(first_component.as_os_str());
-            }
-        }
-
-        if file.is_dir() {
-            fs::create_dir_all(&outpath)?;
-        } else {
-            // Create parent directories
-            if let Some(parent) = outpath.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            // Write file
-            let mut outfile = File::create(&outpath)?;
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)?;
-            outfile.write_all(&buffer)?;
-            files_extracted += 1;
-        }
-    }
-
+    let (_, skill_path, files_extracted) = extract_archive(&mut archive, &install_dir)?;
     pb.finish_and_clear();
+
     output.status(
         "Installed",
         &format!("{} to {}", skill_name, skill_path.display()),
@@ -154,50 +155,12 @@ pub fn install_from_file<P: AsRef<Path>, Q: AsRef<Path>>(
 
     let pb = output.spinner(&format!("Installing from {}", skill_file.display()));
 
-    // Read the skill file
     let file = File::open(skill_file)
         .with_context(|| format!("Failed to open {}", skill_file.display()))?;
-
     let mut archive = ZipArchive::new(file)?;
-
-    // Create install directory
-    fs::create_dir_all(install_dir)?;
-
-    // Extract
-    let mut files_extracted = 0;
-    let mut skill_name = String::new();
-    let mut skill_path = install_dir.to_path_buf();
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let name = file.name().to_string();
-
-        // Get skill name from first path component
-        if i == 0 {
-            if let Some(first) = PathBuf::from(&name).components().next() {
-                skill_name = first.as_os_str().to_string_lossy().to_string();
-                skill_path = install_dir.join(&skill_name);
-            }
-        }
-
-        let outpath = install_dir.join(&name);
-
-        if file.is_dir() {
-            fs::create_dir_all(&outpath)?;
-        } else {
-            if let Some(parent) = outpath.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            let mut outfile = File::create(&outpath)?;
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)?;
-            outfile.write_all(&buffer)?;
-            files_extracted += 1;
-        }
-    }
-
+    let (skill_name, skill_path, files_extracted) = extract_archive(&mut archive, install_dir)?;
     pb.finish_and_clear();
+
     output.status(
         "Installed",
         &format!("{} to {}", skill_name, skill_path.display()),

@@ -4,7 +4,7 @@ mod common;
 
 use skill_builder::local_storage::LocalStorageClient;
 use skill_builder::output::Output;
-use skill_builder::repository::Repository;
+use skill_builder::repository::{Repository, UploadParams};
 use skill_builder::s3::mock::MockS3Client;
 use std::fs;
 use tempfile::TempDir;
@@ -37,23 +37,31 @@ fn create_test_skill_file(dir: &std::path::Path) -> std::path::PathBuf {
     dist.join("repo-test-skill.skill")
 }
 
+fn upload_params<'a>(
+    name: &'a str,
+    version: &'a str,
+    skill_file: &'a std::path::Path,
+) -> UploadParams<'a> {
+    UploadParams {
+        name,
+        version,
+        description: "desc",
+        llms_txt_url: "https://example.com/llms.txt",
+        skill_file,
+        changelog: None,
+        source_dir: None,
+    }
+}
+
 #[test]
 fn test_upload_and_list() {
     let out = test_output();
     let (repo, tmp) = setup();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload(
-        "test-skill",
-        "1.0.0",
-        "A test skill",
-        "https://example.com/llms.txt",
-        &skill_file,
-        None,
-        None,
-        &out,
-    )
-    .unwrap();
+    let mut params = upload_params("test-skill", "1.0.0", &skill_file);
+    params.description = "A test skill";
+    repo.upload(&params, &out).unwrap();
 
     let index = repo.list(None).unwrap();
     assert_eq!(index.skills.len(), 1);
@@ -67,17 +75,8 @@ fn test_upload_download_roundtrip() {
     let skill_file = create_test_skill_file(tmp.path());
     let original_data = fs::read(&skill_file).unwrap();
 
-    repo.upload(
-        "test-skill",
-        "1.0.0",
-        "desc",
-        "url",
-        &skill_file,
-        None,
-        None,
-        &out,
-    )
-    .unwrap();
+    repo.upload(&upload_params("test-skill", "1.0.0", &skill_file), &out)
+        .unwrap();
 
     let output_dir = tmp.path().join("output");
     let downloaded = repo
@@ -94,9 +93,9 @@ fn test_upload_multiple_versions() {
     let (repo, tmp) = setup();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload("s", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "1.0.0", &skill_file), &out)
         .unwrap();
-    repo.upload("s", "2.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "2.0.0", &skill_file), &out)
         .unwrap();
 
     let index = repo.list(None).unwrap();
@@ -110,9 +109,9 @@ fn test_delete_specific_version() {
     let (repo, tmp) = setup();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload("s", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "1.0.0", &skill_file), &out)
         .unwrap();
-    repo.upload("s", "2.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "2.0.0", &skill_file), &out)
         .unwrap();
 
     repo.delete("s", Some("1.0.0"), &out).unwrap();
@@ -129,7 +128,7 @@ fn test_delete_all_versions() {
     let (repo, tmp) = setup();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload("s", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "1.0.0", &skill_file), &out)
         .unwrap();
 
     repo.delete("s", None, &out).unwrap();
@@ -144,9 +143,9 @@ fn test_list_with_filter() {
     let (repo, tmp) = setup();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload("a", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("a", "1.0.0", &skill_file), &out)
         .unwrap();
-    repo.upload("b", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("b", "1.0.0", &skill_file), &out)
         .unwrap();
 
     let filtered = repo.list(Some("a")).unwrap();
@@ -160,7 +159,7 @@ fn test_download_caches_result() {
     let (repo, tmp) = setup_with_cache();
     let skill_file = create_test_skill_file(tmp.path());
 
-    repo.upload("s", "1.0.0", "d", "u", &skill_file, None, None, &out)
+    repo.upload(&upload_params("s", "1.0.0", &skill_file), &out)
         .unwrap();
 
     let path1 = repo.download("s", Some("1.0.0"), None, &out).unwrap();

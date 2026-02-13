@@ -11,8 +11,7 @@ use skill_builder::index::load_index;
 use skill_builder::install::install_from_file;
 use skill_builder::local_storage::LocalStorageClient;
 use skill_builder::output::Output;
-use skill_builder::repository::Repository;
-use skill_builder::s3::S3Client;
+use skill_builder::repository::{Repository, UploadParams};
 use skill_builder::storage::StorageOperations;
 use skill_builder::validate::{print_validation_result, validate_skill};
 
@@ -411,11 +410,7 @@ fn run() -> Result<()> {
                 anyhow::bail!("Skill directory not found: {}", skill_path.display());
             }
 
-            skill_builder::package::package_skill_with_output(
-                &skill_path,
-                &output_dir,
-                Some(&output),
-            )?;
+            skill_builder::package::package_skill_with_output(&skill_path, &output_dir, &output)?;
         }
 
         Commands::Install {
@@ -436,6 +431,7 @@ fn run() -> Result<()> {
                 &agent_target,
                 install_dir.as_deref(),
                 global,
+                std::path::Path::new("."),
             );
 
             if let Some(file_path) = file {
@@ -475,8 +471,9 @@ fn run() -> Result<()> {
                 output.newline();
                 let mut rows = Vec::new();
                 for skill in &config.skills {
-                    let desc = if skill.description.len() > 60 {
-                        format!("{}...", &skill.description[..60])
+                    let desc = if skill.description.chars().count() > 60 {
+                        let truncated: String = skill.description.chars().take(60).collect();
+                        format!("{}...", truncated)
                     } else {
                         skill.description.clone()
                     };
@@ -513,16 +510,7 @@ fn handle_repo_command(
         .as_ref()
         .context("No 'repository' section found in config. Add one to use repo commands.")?;
 
-    let client = S3Client::new(repo_config)?;
-
-    // Set up optional local cache
-    let repo = if repo_config.local_is_cache() {
-        let local_path = repo_config.local_repo_path();
-        let local_cache = LocalStorageClient::new(&local_path)?;
-        Repository::new_with_cache(client, local_cache)
-    } else {
-        Repository::new(client)
-    };
+    let repo = Repository::from_config(repo_config)?;
 
     match action {
         RepoAction::Upload {
@@ -550,13 +538,15 @@ fn handle_repo_command(
 
             output.header(&format!("Uploading {} v{}...", skill, version));
             repo.upload(
-                &skill,
-                &version,
-                description,
-                llms_txt_url,
-                &skill_file,
-                changelog.as_deref(),
-                source_dir.as_deref(),
+                &UploadParams {
+                    name: &skill,
+                    version: &version,
+                    description,
+                    llms_txt_url,
+                    skill_file: &skill_file,
+                    changelog: changelog.as_deref(),
+                    source_dir: source_dir.as_deref(),
+                },
                 output,
             )?;
             output.status("Done", &format!("Uploaded {} v{}", skill, version));
@@ -583,6 +573,7 @@ fn handle_repo_command(
                 &agent_target,
                 install_dir.as_deref(),
                 global,
+                std::path::Path::new("."),
             );
 
             for dir in &install_dirs {
@@ -699,13 +690,17 @@ fn handle_local_command(
                 let prefix = format!("skills/{}/", name);
                 let keys = client.list_objects(&prefix).unwrap_or_default();
                 for key in &keys {
-                    client.delete_object(key).ok();
+                    if let Err(e) = client.delete_object(key) {
+                        output.warn(&format!("Failed to delete {}: {}", key, e));
+                    }
                 }
                 output.status("Cleared", &format!("local repository for {}", name));
             } else {
                 let keys = client.list_objects("skills/").unwrap_or_default();
                 for key in &keys {
-                    client.delete_object(key).ok();
+                    if let Err(e) = client.delete_object(key) {
+                        output.warn(&format!("Failed to delete {}: {}", key, e));
+                    }
                 }
                 output.status("Cleared", "all skills from local repository");
             }
