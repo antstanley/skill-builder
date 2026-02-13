@@ -64,17 +64,28 @@ fn test_detection_with_agents_md_marker() {
 }
 
 #[test]
+fn test_detection_with_kiro_marker() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".kiro")).unwrap();
+
+    let agents = detect_project_agents(tmp.path());
+    assert!(agents.contains(&AgentFramework::Kiro));
+}
+
+#[test]
 fn test_detection_with_all_markers() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".claude")).unwrap();
     fs::create_dir_all(tmp.path().join(".opencode")).unwrap();
     fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+    fs::create_dir_all(tmp.path().join(".kiro")).unwrap();
 
     let agents = detect_project_agents(tmp.path());
-    assert_eq!(agents.len(), 3);
+    assert_eq!(agents.len(), 4);
     assert!(agents.contains(&AgentFramework::Claude));
     assert!(agents.contains(&AgentFramework::OpenCode));
     assert!(agents.contains(&AgentFramework::Codex));
+    assert!(agents.contains(&AgentFramework::Kiro));
 }
 
 #[test]
@@ -100,7 +111,7 @@ fn test_resolve_auto_with_markers() {
     // Auto detection happens in resolve_install_dirs using cwd,
     // so we test the specific and all targets directly
     let dirs = resolve_install_dirs(&AgentTarget::All, None, false);
-    assert_eq!(dirs.len(), 3);
+    assert_eq!(dirs.len(), 4);
 }
 
 #[test]
@@ -118,7 +129,7 @@ fn test_resolve_global_dirs() {
 #[test]
 fn test_resolve_global_all_dirs() {
     let dirs = resolve_install_dirs(&AgentTarget::All, None, true);
-    assert_eq!(dirs.len(), 3);
+    assert_eq!(dirs.len(), 4);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # skill-builder
 
-A Rust CLI tool that builds [Agent Skills](https://agentskills.io) from any `llms.txt` URL. Skills work across Claude Code, OpenCode, and Codex — the tool auto-detects which agents are configured and installs to all of them.
+A Rust CLI tool that builds [Agent Skills](https://agentskills.io) from any `llms.txt` URL. Skills work across Claude Code, OpenCode, Codex, and Kiro — the tool auto-detects which agents are configured and installs to all of them.
 
 ## Installation
 
@@ -84,6 +84,7 @@ Agent Skills is an open standard with identical `SKILL.md` format across multipl
 | Claude Code | `.claude/` dir or `CLAUDE.md` | `.claude/skills/` | `~/.claude/skills/` |
 | OpenCode | `.opencode/` dir or `opencode.json` | `.opencode/skills/` | `~/.config/opencode/skills/` |
 | Codex | `.codex/` dir or `AGENTS.md` | `.agents/skills/` | `~/.codex/skills/` |
+| Kiro | `.kiro/` dir | `.kiro/skills/` | `~/.kiro/skills/` |
 
 If no agent markers are found, defaults to Claude Code.
 

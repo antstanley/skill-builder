@@ -137,7 +137,7 @@ enum Commands {
         #[arg(long)]
         install_dir: Option<PathBuf>,
 
-        /// Target agent framework: claude, opencode, codex, or all
+        /// Target agent framework: claude, opencode, codex, kiro, or all
         #[arg(long)]
         agent: Option<String>,
 
@@ -242,7 +242,7 @@ enum RepoAction {
         #[arg(long)]
         install_dir: Option<PathBuf>,
 
-        /// Target agent framework: claude, opencode, codex, or all
+        /// Target agent framework: claude, opencode, codex, kiro, or all
         #[arg(long)]
         agent: Option<String>,
 

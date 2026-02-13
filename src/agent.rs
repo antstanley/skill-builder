@@ -8,6 +8,7 @@ pub enum AgentFramework {
     Claude,
     OpenCode,
     Codex,
+    Kiro,
 }
 
 impl AgentFramework {
@@ -17,6 +18,7 @@ impl AgentFramework {
             Self::Claude => "Claude",
             Self::OpenCode => "OpenCode",
             Self::Codex => "Codex",
+            Self::Kiro => "Kiro",
         }
     }
 
@@ -26,6 +28,7 @@ impl AgentFramework {
             Self::Claude => ".claude/skills",
             Self::OpenCode => ".opencode/skills",
             Self::Codex => ".agents/skills",
+            Self::Kiro => ".kiro/skills",
         }
     }
 
@@ -36,6 +39,7 @@ impl AgentFramework {
             Self::Claude => home.join(".claude/skills"),
             Self::OpenCode => home.join(".config/opencode/skills"),
             Self::Codex => home.join(".codex/skills"),
+            Self::Kiro => home.join(".kiro/skills"),
         }
     }
 }
@@ -55,9 +59,10 @@ pub fn parse_agent_flag(value: Option<&str>) -> anyhow::Result<AgentTarget> {
         Some("claude") => Ok(AgentTarget::Specific(AgentFramework::Claude)),
         Some("opencode") => Ok(AgentTarget::Specific(AgentFramework::OpenCode)),
         Some("codex") => Ok(AgentTarget::Specific(AgentFramework::Codex)),
+        Some("kiro") => Ok(AgentTarget::Specific(AgentFramework::Kiro)),
         Some("all") => Ok(AgentTarget::All),
         Some(other) => anyhow::bail!(
-            "Unknown agent '{}'. Valid options: claude, opencode, codex, all",
+            "Unknown agent '{}'. Valid options: claude, opencode, codex, kiro, all",
             other
         ),
     }
@@ -82,6 +87,11 @@ pub fn detect_project_agents(project_root: &Path) -> Vec<AgentFramework> {
         agents.push(AgentFramework::Codex);
     }
 
+    // Kiro: .kiro/ dir
+    if project_root.join(".kiro").is_dir() {
+        agents.push(AgentFramework::Kiro);
+    }
+
     // Default to Claude if nothing detected
     if agents.is_empty() {
         agents.push(AgentFramework::Claude);
@@ -103,6 +113,9 @@ pub fn detect_global_agents() -> Vec<AgentFramework> {
     }
     if home.join(".codex").is_dir() {
         agents.push(AgentFramework::Codex);
+    }
+    if home.join(".kiro").is_dir() {
+        agents.push(AgentFramework::Kiro);
     }
 
     if agents.is_empty() {
@@ -143,6 +156,7 @@ pub fn resolve_install_dirs(
             agent_to_dir(&AgentFramework::Claude),
             agent_to_dir(&AgentFramework::OpenCode),
             agent_to_dir(&AgentFramework::Codex),
+            agent_to_dir(&AgentFramework::Kiro),
         ],
         AgentTarget::Auto => {
             let agents = if global {
@@ -184,6 +198,12 @@ mod tests {
         assert!(matches!(
             target,
             AgentTarget::Specific(AgentFramework::Codex)
+        ));
+
+        let target = parse_agent_flag(Some("kiro")).unwrap();
+        assert!(matches!(
+            target,
+            AgentTarget::Specific(AgentFramework::Kiro)
         ));
     }
 
@@ -254,17 +274,28 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_project_agents_kiro_dir() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".kiro")).unwrap();
+
+        let agents = detect_project_agents(tmp.path());
+        assert_eq!(agents, vec![AgentFramework::Kiro]);
+    }
+
+    #[test]
     fn test_detect_project_agents_multiple() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
         std::fs::create_dir_all(tmp.path().join(".opencode")).unwrap();
         std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".kiro")).unwrap();
 
         let agents = detect_project_agents(tmp.path());
-        assert_eq!(agents.len(), 3);
+        assert_eq!(agents.len(), 4);
         assert!(agents.contains(&AgentFramework::Claude));
         assert!(agents.contains(&AgentFramework::OpenCode));
         assert!(agents.contains(&AgentFramework::Codex));
+        assert!(agents.contains(&AgentFramework::Kiro));
     }
 
     #[test]
@@ -299,12 +330,19 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_specific_kiro() {
+        let dirs = resolve_install_dirs(&AgentTarget::Specific(AgentFramework::Kiro), None, false);
+        assert_eq!(dirs, vec![PathBuf::from(".kiro/skills")]);
+    }
+
+    #[test]
     fn test_resolve_all_agents() {
         let dirs = resolve_install_dirs(&AgentTarget::All, None, false);
-        assert_eq!(dirs.len(), 3);
+        assert_eq!(dirs.len(), 4);
         assert_eq!(dirs[0], PathBuf::from(".claude/skills"));
         assert_eq!(dirs[1], PathBuf::from(".opencode/skills"));
         assert_eq!(dirs[2], PathBuf::from(".agents/skills"));
+        assert_eq!(dirs[3], PathBuf::from(".kiro/skills"));
     }
 
     #[test]
@@ -318,5 +356,6 @@ mod tests {
             ".opencode/skills"
         );
         assert_eq!(AgentFramework::Codex.project_skills_dir(), ".agents/skills");
+        assert_eq!(AgentFramework::Kiro.project_skills_dir(), ".kiro/skills");
     }
 }
