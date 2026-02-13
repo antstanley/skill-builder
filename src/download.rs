@@ -10,6 +10,7 @@ use std::time::Duration;
 use url::Url;
 
 use crate::config::SkillConfig;
+use crate::output::Output;
 
 /// HTTP client with reasonable defaults.
 fn create_client() -> Result<Client> {
@@ -135,15 +136,20 @@ pub struct DownloadResult {
 }
 
 /// Download all documentation for a skill.
-pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec<DownloadResult>> {
+pub fn download_skill_docs(
+    skill: &SkillConfig,
+    source_dir: &Path,
+    output: &Output,
+) -> Result<Vec<DownloadResult>> {
     let client = create_client()?;
 
-    println!("Downloading llms.txt from {}", skill.llms_txt_url);
+    let pb = output.spinner(&format!("Downloading llms.txt from {}", skill.llms_txt_url));
 
     let llms_content = download_url(&client, &skill.llms_txt_url)?;
     let urls = extract_urls(&llms_content);
+    pb.finish_and_clear();
 
-    println!("Found {} .md files to download", urls.len());
+    output.info(&format!("Found {} .md files to download", urls.len()));
 
     // Auto-detect path prefix if not specified
     let path_prefix = skill
@@ -152,7 +158,7 @@ pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec
         .or_else(|| detect_path_prefix(&urls));
 
     if let Some(ref prefix) = path_prefix {
-        println!("Using path prefix: {}", prefix);
+        output.step(&format!("Using path prefix: {}", prefix));
     }
 
     // Prepare source directory
@@ -173,6 +179,7 @@ pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec
 
     // Download each file
     let mut results = Vec::new();
+    let progress = output.progress_bar(urls.len() as u64, "Downloading docs");
 
     for url in &urls {
         let local_path = url_to_local_path(url, path_prefix.as_deref())?;
@@ -183,12 +190,9 @@ pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec
             fs::create_dir_all(parent)?;
         }
 
-        print!("  Downloading: {} ... ", local_path.display());
-
         match download_url(&client, url) {
             Ok(content) => {
                 fs::write(&full_path, &content)?;
-                println!("OK");
                 results.push(DownloadResult {
                     url: url.clone(),
                     local_path,
@@ -197,37 +201,42 @@ pub fn download_skill_docs(skill: &SkillConfig, source_dir: &Path) -> Result<Vec
                 });
             }
             Err(e) => {
-                println!("FAILED: {}", e);
                 results.push(DownloadResult {
                     url: url.clone(),
-                    local_path,
+                    local_path: local_path.clone(),
                     success: false,
                     error: Some(e.to_string()),
                 });
+                output.warn(&format!("Failed: {}", local_path.display()));
             }
         }
+        progress.inc(1);
     }
+    progress.finish_and_clear();
 
     // Update llms.txt with local paths and save
     let updated_llms = update_llms_txt_paths(&llms_content, &urls, path_prefix.as_deref());
     let llms_path = skill_source_dir.join("llms.txt");
     fs::write(&llms_path, updated_llms)?;
-    println!("Saved: {}", llms_path.display());
 
     let success_count = results.iter().filter(|r| r.success).count();
     let fail_count = results.iter().filter(|r| !r.success).count();
 
-    println!();
-    println!("Downloaded {} files", success_count);
+    output.status("Downloaded", &format!("{} files", success_count));
     if fail_count > 0 {
-        println!("Failed to download {} files", fail_count);
+        output.warn(&format!("Failed to download {} files", fail_count));
     }
 
     Ok(results)
 }
 
 /// Download docs from a URL without a config file.
-pub fn download_from_url(url: &str, name: &str, source_dir: &Path) -> Result<Vec<DownloadResult>> {
+pub fn download_from_url(
+    url: &str,
+    name: &str,
+    source_dir: &Path,
+    output: &Output,
+) -> Result<Vec<DownloadResult>> {
     let skill = SkillConfig {
         name: name.to_string(),
         description: String::new(),
@@ -236,7 +245,7 @@ pub fn download_from_url(url: &str, name: &str, source_dir: &Path) -> Result<Vec
         path_prefix: None,
     };
 
-    download_skill_docs(&skill, source_dir)
+    download_skill_docs(&skill, source_dir, output)
 }
 
 #[cfg(test)]

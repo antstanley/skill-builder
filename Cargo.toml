@@ -24,6 +24,8 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 dialoguer = "0.11"
 dirs = "6"
 chrono = { version = "0.4", features = ["serde"] }
+console = "0.15"
+indicatif = "0.17"
 
 [dev-dependencies]
 tempfile = "3"

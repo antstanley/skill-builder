@@ -6,10 +6,15 @@ use skill_builder::config::SkillConfig;
 use skill_builder::download::{
     detect_path_prefix, download_skill_docs, extract_urls, update_llms_txt_paths, url_to_local_path,
 };
+use skill_builder::output::Output;
 use std::fs;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn test_output() -> Output {
+    Output::new(true)
+}
 
 #[tokio::test]
 async fn test_download_llms_txt_from_mock_server() {
@@ -56,10 +61,13 @@ async fn test_download_llms_txt_from_mock_server() {
     };
 
     // Run blocking operation in a separate thread
-    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
-        .await
-        .unwrap()
-        .unwrap();
+    let results = tokio::task::spawn_blocking(move || {
+        let out = test_output();
+        download_skill_docs(&skill, &temp_path, &out)
+    })
+    .await
+    .unwrap()
+    .unwrap();
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.success));
@@ -103,10 +111,13 @@ async fn test_handle_404_gracefully() {
         path_prefix: None,
     };
 
-    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
-        .await
-        .unwrap()
-        .unwrap();
+    let results = tokio::task::spawn_blocking(move || {
+        let out = test_output();
+        download_skill_docs(&skill, &temp_path, &out)
+    })
+    .await
+    .unwrap()
+    .unwrap();
 
     // Should have one result with success=false
     assert_eq!(results.len(), 1);
@@ -156,10 +167,13 @@ async fn test_handle_redirect() {
     };
 
     // reqwest follows redirects by default
-    let results = tokio::task::spawn_blocking(move || download_skill_docs(&skill, &temp_path))
-        .await
-        .unwrap()
-        .unwrap();
+    let results = tokio::task::spawn_blocking(move || {
+        let out = test_output();
+        download_skill_docs(&skill, &temp_path, &out)
+    })
+    .await
+    .unwrap()
+    .unwrap();
 
     assert_eq!(results.len(), 1);
     assert!(results[0].success);

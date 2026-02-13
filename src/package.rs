@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
+use crate::output::Output;
 use crate::validate::{validate_skill, ValidationResult};
 
 /// Files and directories to skip when packaging.
@@ -78,9 +79,20 @@ pub struct PackageResult {
 }
 
 /// Package a skill directory into a .skill file.
+///
+/// If `output` is None, packaging runs silently (used internally by tests).
 pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
+) -> Result<PackageResult> {
+    package_skill_with_output(skill_path, output_dir, None)
+}
+
+/// Package a skill directory into a .skill file with output.
+pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
+    skill_path: P,
+    output_dir: Q,
+    output: Option<&Output>,
 ) -> Result<PackageResult> {
     let skill_path = skill_path.as_ref();
     let output_dir = output_dir.as_ref();
@@ -91,24 +103,29 @@ pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
         .context("Invalid skill path")?
         .to_string_lossy();
 
-    println!("Packaging skill: {}", skill_path.display());
-    println!("Output directory: {}", output_dir.display());
-    println!();
+    if let Some(out) = output {
+        out.header(&format!("Packaging skill: {}", skill_path.display()));
+        out.step(&format!("Output directory: {}", output_dir.display()));
+        out.newline();
+    }
 
     // Validate first
-    println!("Validating skill...");
     let validation = validate_skill(skill_path);
 
     if !validation.valid {
-        println!("Validation failed:");
-        for error in &validation.errors {
-            println!("  - {}", error);
+        if let Some(out) = output {
+            out.error("Validation failed:");
+            for error in &validation.errors {
+                out.step(&format!("- {}", error));
+            }
         }
         anyhow::bail!("Skill validation failed");
     }
 
-    println!("Skill is valid!");
-    println!();
+    if let Some(out) = output {
+        out.status("Valid", "Skill is valid!");
+        out.newline();
+    }
 
     // Create output directory
     fs::create_dir_all(output_dir)?;
@@ -121,29 +138,38 @@ pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
     let file = File::create(&output_path)?;
     let mut zip = ZipWriter::new(file);
 
-    let options = SimpleFileOptions::default()
+    let zip_options = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o644);
 
     // Add files to archive
+    let progress = output.map(|out| out.progress_bar(files.len() as u64, "Adding files"));
+
     for file_path in &files {
         let relative_path = file_path.strip_prefix(skill_path)?;
         let archive_path = PathBuf::from(skill_name.as_ref()).join(relative_path);
 
-        println!("  Added: {}", archive_path.display());
-
-        zip.start_file(archive_path.to_string_lossy(), options)?;
+        zip.start_file(archive_path.to_string_lossy(), zip_options)?;
 
         let mut f = File::open(file_path)?;
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer)?;
         zip.write_all(&buffer)?;
+
+        if let Some(ref pb) = progress {
+            pb.inc(1);
+        }
+    }
+
+    if let Some(pb) = progress {
+        pb.finish_and_clear();
     }
 
     zip.finish()?;
 
-    println!();
-    println!("Successfully packaged skill to: {}", output_path.display());
+    if let Some(out) = output {
+        out.status("Packaged", &format!("{}", output_path.display()));
+    }
 
     Ok(PackageResult {
         output_path,

@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zip::ZipArchive;
 
+use crate::output::Output;
+
 /// Default repository for skill releases.
 pub const DEFAULT_REPO: &str = "antstanley/skill-builder";
 
@@ -53,6 +55,7 @@ pub fn install_skill(
     version: Option<&str>,
     repo: Option<&str>,
     install_dir: Option<&Path>,
+    output: &Output,
 ) -> Result<InstallResult> {
     let client = create_client()?;
 
@@ -63,16 +66,13 @@ pub fn install_skill(
 
     let url = get_release_url(skill_name, version, repo);
 
-    println!("Installing {} skill...", skill_name);
-    if let Some(v) = version {
-        println!("Version: {}", v);
-    } else {
-        println!("Version: latest");
-    }
-    println!();
+    output.header(&format!("Installing {} skill...", skill_name));
+    let ver_str = version.unwrap_or("latest");
+    output.step(&format!("Version: {}", ver_str));
+    output.newline();
 
     // Download the skill file
-    println!("Downloading from {}...", url);
+    let pb = output.spinner(&format!("Downloading from {}", url));
 
     let response = client
         .get(&url)
@@ -80,16 +80,18 @@ pub fn install_skill(
         .with_context(|| format!("Failed to download {}", url))?;
 
     if !response.status().is_success() {
+        pb.finish_and_clear();
         anyhow::bail!("HTTP {} when downloading {}", response.status(), url);
     }
 
     let bytes = response.bytes().context("Failed to read response body")?;
+    pb.finish_and_clear();
 
     // Create install directory
     fs::create_dir_all(&install_dir)?;
 
     // Extract the skill
-    println!("Extracting skill...");
+    let pb = output.spinner("Extracting skill");
 
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
@@ -125,19 +127,14 @@ pub fn install_skill(
             file.read_to_end(&mut buffer)?;
             outfile.write_all(&buffer)?;
             files_extracted += 1;
-
-            println!("  Extracted: {}", name);
         }
     }
 
-    println!();
-    println!(
-        "Successfully installed {} skill to {}",
-        skill_name,
-        skill_path.display()
+    pb.finish_and_clear();
+    output.status(
+        "Installed",
+        &format!("{} to {}", skill_name, skill_path.display()),
     );
-    println!();
-    println!("The skill will be available in Claude Code for projects in this directory.");
 
     Ok(InstallResult {
         skill_name: skill_name.to_string(),
@@ -150,11 +147,12 @@ pub fn install_skill(
 pub fn install_from_file<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_file: P,
     install_dir: Q,
+    output: &Output,
 ) -> Result<InstallResult> {
     let skill_file = skill_file.as_ref();
     let install_dir = install_dir.as_ref();
 
-    println!("Installing skill from {}...", skill_file.display());
+    let pb = output.spinner(&format!("Installing from {}", skill_file.display()));
 
     // Read the skill file
     let file = File::open(skill_file)
@@ -196,16 +194,13 @@ pub fn install_from_file<P: AsRef<Path>, Q: AsRef<Path>>(
             file.read_to_end(&mut buffer)?;
             outfile.write_all(&buffer)?;
             files_extracted += 1;
-
-            println!("  Extracted: {}", name);
         }
     }
 
-    println!();
-    println!(
-        "Successfully installed {} skill to {}",
-        skill_name,
-        skill_path.display()
+    pb.finish_and_clear();
+    output.status(
+        "Installed",
+        &format!("{} to {}", skill_name, skill_path.display()),
     );
 
     Ok(InstallResult {
@@ -221,6 +216,10 @@ mod tests {
     use crate::package::package_skill;
     use std::fs;
     use tempfile::TempDir;
+
+    fn test_output() -> Output {
+        Output::new(true)
+    }
 
     #[test]
     fn test_get_release_url_latest() {
@@ -251,6 +250,7 @@ mod tests {
 
     #[test]
     fn test_install_from_file() {
+        let out = test_output();
         let temp = TempDir::new().unwrap();
 
         // Create a test skill to package
@@ -277,7 +277,7 @@ description: A test skill for installation testing with enough characters to pas
 
         // Install it
         let install_dir = temp.path().join("installed");
-        let result = install_from_file(&package_result.output_path, &install_dir).unwrap();
+        let result = install_from_file(&package_result.output_path, &install_dir, &out).unwrap();
 
         assert_eq!(result.skill_name, "test-skill");
         assert!(result.install_path.exists());

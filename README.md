@@ -1,6 +1,6 @@
 # skill-builder
 
-A Rust CLI tool that builds [Claude Code](https://claude.ai/claude-code) skills from any `llms.txt` URL.
+A Rust CLI tool that builds [Agent Skills](https://agentskills.io) from any `llms.txt` URL. Skills work across Claude Code, OpenCode, and Codex — the tool auto-detects which agents are configured and installs to all of them.
 
 ## Installation
 
@@ -65,12 +65,70 @@ sb download my-library
 
 4. **Create/update the skill in `skills/my-library/`** with a `SKILL.md` and `references/` directory.
 
-5. **Validate and package:**
+5. **Validate, package, and install:**
 
 ```bash
 sb validate my-library
 sb package my-library --output dist/
+sb install my-library --file dist/my-library.skill
 ```
+
+## Multi-Agent Support
+
+Agent Skills is an open standard with identical `SKILL.md` format across multiple coding agents. `sb` auto-detects which agents are configured in your project and installs skills to all of them.
+
+### Supported Agents
+
+| Agent | Detection Markers | Project Install Dir | Global Install Dir |
+|-------|-------------------|--------------------|--------------------|
+| Claude Code | `.claude/` dir or `CLAUDE.md` | `.claude/skills/` | `~/.claude/skills/` |
+| OpenCode | `.opencode/` dir or `opencode.json` | `.opencode/skills/` | `~/.config/opencode/skills/` |
+| Codex | `.codex/` dir or `AGENTS.md` | `.agents/skills/` | `~/.codex/skills/` |
+
+If no agent markers are found, defaults to Claude Code.
+
+### Targeting Agents
+
+```bash
+# Auto-detect agents and install to all detected (default)
+sb install my-skill --file dist/my-skill.skill
+
+# Install to a specific agent only
+sb install my-skill --file dist/my-skill.skill --agent codex
+
+# Install to all three agents regardless of detection
+sb install my-skill --file dist/my-skill.skill --agent all
+
+# Install to global agent directories
+sb install my-skill --file dist/my-skill.skill --global
+
+# Override with explicit directory (bypasses agent detection)
+sb install my-skill --file dist/my-skill.skill --install-dir ./custom/path
+```
+
+The `--agent` and `--global` flags also work on `sb repo install`.
+
+## Agent Output Mode
+
+For consumption by AI agents and automation pipelines, `sb` supports a structured plain-text output mode with prefixed lines:
+
+```bash
+# Enable via flag
+sb --agent-output validate my-skill
+
+# Enable via environment variable
+SB_AGENT_OUTPUT=1 sb validate my-skill
+```
+
+| Prefix | Meaning |
+|--------|---------|
+| `[OK]` | Success status |
+| `[INFO]` | Informational message |
+| `[STEP]` | Progress step |
+| `[WARN]` | Warning |
+| `[ERROR]` | Error |
+
+In human mode (the default), output uses colors, spinners, and progress bars. Colors are disabled automatically when piped or when `NO_COLOR` is set.
 
 ## CLI Reference
 
@@ -123,10 +181,10 @@ sb package shadcn-svelte --output ./releases
 
 ### Install a Skill
 
-By default, `sb install` searches local repo, remote repo, then GitHub releases in order.
+By default, `sb install` searches local repo, remote repo, then GitHub releases in order. Skills are installed to all detected agent directories.
 
 ```bash
-# Install (cascades: local → remote → GitHub)
+# Install (cascades: local -> remote -> GitHub)
 sb install shadcn-svelte
 
 # Install specific version
@@ -145,7 +203,16 @@ sb install shadcn-svelte --github --repo user/repo
 # Install from local .skill file
 sb install shadcn-svelte --file ./dist/shadcn-svelte.skill
 
-# Specify installation directory
+# Target a specific agent
+sb install shadcn-svelte --agent codex
+
+# Install to all agent directories
+sb install shadcn-svelte --agent all
+
+# Install globally
+sb install shadcn-svelte --global
+
+# Override installation directory
 sb install shadcn-svelte --install-dir ~/.claude/skills
 ```
 
@@ -170,7 +237,8 @@ sb repo download my-skill --version 1.0.0 --output ./downloads
 
 # Install a skill directly from the repository
 sb repo install my-skill
-sb repo install my-skill --version 1.0.0 --install-dir .claude/skills
+sb repo install my-skill --version 1.0.0
+sb repo install my-skill --agent codex --global
 
 # Delete a skill from the repository
 sb repo delete my-skill --yes
@@ -197,6 +265,13 @@ sb local clear --skill my-skill
 ```
 
 Default local repository location: `$HOME/.skill-builder/local/`
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--config <path>` | Path to skills configuration file |
+| `--agent-output` | Output plain text with prefixed lines for agent consumption |
 
 ## Configuration
 
@@ -290,6 +365,7 @@ skill-builder/
 ├── src/
 │   ├── main.rs             # CLI entry point
 │   ├── lib.rs              # Library root
+│   ├── agent.rs            # Agent framework detection (Claude, OpenCode, Codex)
 │   ├── config.rs           # Configuration parsing with fallback
 │   ├── download.rs         # Document downloading
 │   ├── validate.rs         # Skill validation
@@ -297,6 +373,7 @@ skill-builder/
 │   ├── install.rs          # Skill installation (GitHub)
 │   ├── install_resolver.rs # Multi-source install resolution
 │   ├── init.rs             # Interactive init command
+│   ├── output.rs           # Output abstraction (human/agent modes)
 │   ├── s3.rs               # S3-compatible storage client
 │   ├── storage.rs          # StorageOperations trait
 │   ├── local_storage.rs    # Filesystem storage backend

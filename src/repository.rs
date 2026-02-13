@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::index::{load_index, save_index, SkillsIndex};
 use crate::install::install_from_file;
 use crate::local_storage::LocalStorageClient;
+use crate::output::Output;
 use crate::storage::StorageOperations;
 
 /// Repository managing skills in S3 with optional local cache.
@@ -43,14 +44,17 @@ impl<S: StorageOperations> Repository<S> {
         skill_file: &Path,
         changelog: Option<&Path>,
         source_dir: Option<&Path>,
+        output: &Output,
     ) -> Result<()> {
         let skill_data = std::fs::read(skill_file)
             .with_context(|| format!("Failed to read skill file: {}", skill_file.display()))?;
 
         // Upload skill file
         let skill_key = format!("skills/{}/{}/{}.skill", name, version, name);
+        let pb = output.spinner(&format!("Uploading {}", skill_key));
         self.client.put_object(&skill_key, &skill_data)?;
-        println!("  Uploaded: {}", skill_key);
+        pb.finish_and_clear();
+        output.step(&format!("Uploaded: {}", skill_key));
 
         // Upload changelog if provided
         if let Some(changelog_path) = changelog {
@@ -60,7 +64,7 @@ impl<S: StorageOperations> Repository<S> {
             let changelog_key = format!("skills/{}/{}/CHANGELOG.md", name, version);
             self.client
                 .put_object(&changelog_key, changelog_data.as_bytes())?;
-            println!("  Uploaded: {}", changelog_key);
+            output.step(&format!("Uploaded: {}", changelog_key));
         }
 
         // Upload source archive if provided
@@ -68,14 +72,14 @@ impl<S: StorageOperations> Repository<S> {
             let archive = create_source_archive(src_dir, name)?;
             let source_key = format!("source/{}/{}/{}-source.zip", name, version, name);
             self.client.put_object(&source_key, &archive)?;
-            println!("  Uploaded: {}", source_key);
+            output.step(&format!("Uploaded: {}", source_key));
         }
 
         // Update index
         let mut index = load_index(&self.client)?;
         index.add_or_update_skill(name, description, llms_txt_url, version, &skill_key);
         save_index(&self.client, &index)?;
-        println!("  Updated index");
+        output.step("Updated index");
 
         Ok(())
     }
@@ -86,6 +90,7 @@ impl<S: StorageOperations> Repository<S> {
         name: &str,
         version: Option<&str>,
         output_dir: Option<&Path>,
+        output: &Output,
     ) -> Result<PathBuf> {
         let index = load_index(&self.client)?;
         let resolved_version = match version {
@@ -100,7 +105,10 @@ impl<S: StorageOperations> Repository<S> {
         if let Some(ref cache) = self.local_cache {
             let cache_key = format!("skills/{}/{}/{}.skill", name, resolved_version, name);
             if cache.object_exists(&cache_key).unwrap_or(false) {
-                println!("Using cached version: {} v{}", name, resolved_version);
+                output.info(&format!(
+                    "Using cached version: {} v{}",
+                    name, resolved_version
+                ));
                 let data = cache.get_object(&cache_key)?;
                 return write_output(name, &data, output_dir);
             }
@@ -118,8 +126,9 @@ impl<S: StorageOperations> Repository<S> {
         })?;
 
         // Download from primary storage
-        println!("Downloading {} v{}...", name, resolved_version);
+        let pb = output.spinner(&format!("Downloading {} v{}", name, resolved_version));
         let data = self.client.get_object(s3_path)?;
+        pb.finish_and_clear();
 
         // Store in local cache
         if let Some(ref cache) = self.local_cache {
@@ -131,14 +140,20 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// Download and install a skill.
-    pub fn install(&self, name: &str, version: Option<&str>, install_dir: &Path) -> Result<()> {
-        let skill_path = self.download(name, version, None)?;
-        install_from_file(&skill_path, install_dir)?;
+    pub fn install(
+        &self,
+        name: &str,
+        version: Option<&str>,
+        install_dir: &Path,
+        output: &Output,
+    ) -> Result<()> {
+        let skill_path = self.download(name, version, None, output)?;
+        install_from_file(&skill_path, install_dir, output)?;
         Ok(())
     }
 
     /// Delete a skill version (or all versions) from the repository.
-    pub fn delete(&self, name: &str, version: Option<&str>) -> Result<()> {
+    pub fn delete(&self, name: &str, version: Option<&str>, output: &Output) -> Result<()> {
         let mut index = load_index(&self.client)?;
 
         if let Some(ver) = version {
@@ -152,7 +167,7 @@ impl<S: StorageOperations> Repository<S> {
             self.client.delete_object(&source_key).ok();
 
             index.remove_version(name, ver);
-            println!("  Deleted version {} of {}", ver, name);
+            output.step(&format!("Deleted version {} of {}", ver, name));
         } else {
             // Delete all versions
             let entry = index.find_skill(name);
@@ -169,7 +184,7 @@ impl<S: StorageOperations> Repository<S> {
             }
 
             index.remove_skill(name);
-            println!("  Deleted all versions of {}", name);
+            output.step(&format!("Deleted all versions of {}", name));
         }
 
         save_index(&self.client, &index)?;
@@ -274,6 +289,10 @@ mod tests {
     use crate::s3::mock::MockS3Client;
     use tempfile::TempDir;
 
+    fn test_output() -> Output {
+        Output::new(true) // Use agent mode in tests to avoid terminal issues
+    }
+
     fn setup() -> (Repository<MockS3Client>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let client = MockS3Client::new();
@@ -313,6 +332,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_upload_and_list() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -324,6 +344,7 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
@@ -335,6 +356,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_upload_and_download() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -346,15 +368,19 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
-        let downloaded = repo.download("test-skill", Some("1.0.0"), None).unwrap();
+        let downloaded = repo
+            .download("test-skill", Some("1.0.0"), None, &out)
+            .unwrap();
         assert!(downloaded.exists());
     }
 
     #[test]
     fn test_download_uses_cache() {
+        let out = test_output();
         let (repo, tmp) = setup_with_cache();
         let skill_file = create_test_skill(tmp.path());
 
@@ -366,19 +392,25 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
         // First download should cache
-        let path1 = repo.download("test-skill", Some("1.0.0"), None).unwrap();
+        let path1 = repo
+            .download("test-skill", Some("1.0.0"), None, &out)
+            .unwrap();
         // Second download should use cache
-        let path2 = repo.download("test-skill", Some("1.0.0"), None).unwrap();
+        let path2 = repo
+            .download("test-skill", Some("1.0.0"), None, &out)
+            .unwrap();
         assert!(path1.exists());
         assert!(path2.exists());
     }
 
     #[test]
     fn test_download_to_output_dir() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -390,12 +422,13 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
         let output_dir = tmp.path().join("output");
         let path = repo
-            .download("test-skill", Some("1.0.0"), Some(&output_dir))
+            .download("test-skill", Some("1.0.0"), Some(&output_dir), &out)
             .unwrap();
         assert!(path.starts_with(&output_dir));
         assert!(path.exists());
@@ -403,6 +436,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_delete_version() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -414,6 +448,7 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
         repo.upload(
@@ -424,10 +459,11 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
-        repo.delete("test-skill", Some("1.0.0")).unwrap();
+        repo.delete("test-skill", Some("1.0.0"), &out).unwrap();
 
         let index = repo.list(None).unwrap();
         let entry = index.find_skill("test-skill").unwrap();
@@ -437,6 +473,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_delete_all_versions() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -448,10 +485,11 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
-        repo.delete("test-skill", None).unwrap();
+        repo.delete("test-skill", None, &out).unwrap();
 
         let index = repo.list(None).unwrap();
         assert!(index.skills.is_empty());
@@ -459,13 +497,32 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_list_with_filter() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
-        repo.upload("skill-a", "1.0.0", "a", "url", &skill_file, None, None)
-            .unwrap();
-        repo.upload("skill-b", "1.0.0", "b", "url", &skill_file, None, None)
-            .unwrap();
+        repo.upload(
+            "skill-a",
+            "1.0.0",
+            "a",
+            "url",
+            &skill_file,
+            None,
+            None,
+            &out,
+        )
+        .unwrap();
+        repo.upload(
+            "skill-b",
+            "1.0.0",
+            "b",
+            "url",
+            &skill_file,
+            None,
+            None,
+            &out,
+        )
+        .unwrap();
 
         let filtered = repo.list(Some("skill-a")).unwrap();
         assert_eq!(filtered.skills.len(), 1);
@@ -474,6 +531,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_download_latest_version() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -485,6 +543,7 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
         repo.upload(
@@ -495,16 +554,18 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             None,
+            &out,
         )
         .unwrap();
 
         // Download without specifying version should get latest
-        let path = repo.download("test-skill", None, None).unwrap();
+        let path = repo.download("test-skill", None, None, &out).unwrap();
         assert!(path.exists());
     }
 
     #[test]
     fn test_upload_with_changelog() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -519,6 +580,7 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             Some(&changelog),
             None,
+            &out,
         )
         .unwrap();
 
@@ -532,6 +594,7 @@ description: A test skill for repository testing with enough characters to pass 
 
     #[test]
     fn test_upload_with_source() {
+        let out = test_output();
         let (repo, tmp) = setup();
         let skill_file = create_test_skill(tmp.path());
 
@@ -547,6 +610,7 @@ description: A test skill for repository testing with enough characters to pass 
             &skill_file,
             None,
             Some(&source_dir),
+            &out,
         )
         .unwrap();
 

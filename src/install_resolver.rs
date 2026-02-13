@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::install::{install_from_file, install_skill, InstallResult};
 use crate::local_storage::LocalStorageClient;
+use crate::output::Output;
 use crate::repository::Repository;
 use crate::s3::S3Client;
 
@@ -43,53 +44,58 @@ pub struct ResolvedInstall {
 /// 3. GitHub releases (fallback)
 ///
 /// Explicit flags (`--local`, `--remote`, `--github`) skip the cascade.
-pub fn resolve_and_install(config: &Config, options: &InstallOptions) -> Result<ResolvedInstall> {
+pub fn resolve_and_install(
+    config: &Config,
+    options: &InstallOptions,
+    output: &Output,
+) -> Result<ResolvedInstall> {
     let repo_config = config.repository.as_ref();
 
     // Explicit source flags
     if options.local_only {
-        return install_from_local(repo_config, options);
+        return install_from_local(repo_config, options, output);
     }
     if options.remote_only {
-        return install_from_remote(config, options);
+        return install_from_remote(config, options, output);
     }
     if options.github_only {
-        return install_from_github(options);
+        return install_from_github(options, output);
     }
 
     // Cascade: local → remote → GitHub
     if let Some(rc) = repo_config {
         if rc.has_local() {
-            match install_from_local(repo_config, options) {
+            match install_from_local(repo_config, options, output) {
                 Ok(result) => return Ok(result),
                 Err(_) => {
-                    println!(
+                    output.info(&format!(
                         "Skill '{}' not found in local repository, trying next source...",
                         options.skill_name
-                    );
+                    ));
                 }
             }
         }
 
         if rc.has_remote() {
-            match install_from_remote(config, options) {
+            match install_from_remote(config, options, output) {
                 Ok(result) => return Ok(result),
                 Err(_) => {
-                    println!(
+                    output.info(&format!(
                         "Skill '{}' not found in remote repository, trying GitHub...",
                         options.skill_name
-                    );
+                    ));
                 }
             }
         }
     }
 
-    install_from_github(options)
+    install_from_github(options, output)
 }
 
 fn install_from_local(
     repo_config: Option<&crate::config::RepositoryConfig>,
     options: &InstallOptions,
+    output: &Output,
 ) -> Result<ResolvedInstall> {
     let rc = repo_config.context("No repository configured for local install")?;
     let local_path = rc.local_repo_path();
@@ -97,19 +103,23 @@ fn install_from_local(
 
     // Build a Repository backed by local storage
     let repo = Repository::new(client);
-    println!("Looking in local repository...");
+    output.info("Looking in local repository...");
     let skill_path = repo
-        .download(options.skill_name, options.version, None)
+        .download(options.skill_name, options.version, None, output)
         .context("Skill not found in local repository")?;
 
-    let result = install_from_file(&skill_path, options.install_dir)?;
+    let result = install_from_file(&skill_path, options.install_dir, output)?;
     Ok(ResolvedInstall {
         source: InstallSource::Local,
         result,
     })
 }
 
-fn install_from_remote(config: &Config, options: &InstallOptions) -> Result<ResolvedInstall> {
+fn install_from_remote(
+    config: &Config,
+    options: &InstallOptions,
+    output: &Output,
+) -> Result<ResolvedInstall> {
     let rc = config
         .repository
         .as_ref()
@@ -128,8 +138,13 @@ fn install_from_remote(config: &Config, options: &InstallOptions) -> Result<Reso
         Repository::new(client)
     };
 
-    println!("Looking in remote repository...");
-    repo.install(options.skill_name, options.version, options.install_dir)?;
+    output.info("Looking in remote repository...");
+    repo.install(
+        options.skill_name,
+        options.version,
+        options.install_dir,
+        output,
+    )?;
 
     Ok(ResolvedInstall {
         source: InstallSource::Remote,
@@ -141,13 +156,14 @@ fn install_from_remote(config: &Config, options: &InstallOptions) -> Result<Reso
     })
 }
 
-fn install_from_github(options: &InstallOptions) -> Result<ResolvedInstall> {
-    println!("Installing from GitHub releases...");
+fn install_from_github(options: &InstallOptions, output: &Output) -> Result<ResolvedInstall> {
+    output.info("Installing from GitHub releases...");
     let result = install_skill(
         options.skill_name,
         options.version,
         options.github_repo,
         Some(options.install_dir),
+        output,
     )?;
 
     Ok(ResolvedInstall {
@@ -163,7 +179,12 @@ mod tests {
     use crate::package::package_skill;
     use tempfile::TempDir;
 
+    fn test_output() -> Output {
+        Output::new(true)
+    }
+
     fn create_test_skill_in_local_repo(local_path: &Path) -> String {
+        let out = test_output();
         let tmp = TempDir::new().unwrap();
         let skill_dir = tmp.path().join("resolver-test");
         std::fs::create_dir_all(skill_dir.join("references")).unwrap();
@@ -194,6 +215,7 @@ description: A test skill for resolver testing with enough characters to pass va
             &package_result.output_path,
             None,
             None,
+            &out,
         )
         .unwrap();
 
@@ -202,6 +224,7 @@ description: A test skill for resolver testing with enough characters to pass va
 
     #[test]
     fn test_install_from_local_repo() {
+        let out = test_output();
         let tmp = TempDir::new().unwrap();
         let local_path = tmp.path().join("local");
         let install_dir = tmp.path().join("installed");
@@ -232,13 +255,14 @@ description: A test skill for resolver testing with enough characters to pass va
             github_only: false,
         };
 
-        let resolved = resolve_and_install(&config, &options).unwrap();
+        let resolved = resolve_and_install(&config, &options, &out).unwrap();
         assert_eq!(resolved.source, InstallSource::Local);
         assert!(install_dir.join("resolver-test/SKILL.md").exists());
     }
 
     #[test]
     fn test_local_not_found_falls_through_to_github_error() {
+        let out = test_output();
         let tmp = TempDir::new().unwrap();
         let local_path = tmp.path().join("local");
         std::fs::create_dir_all(&local_path).unwrap();
@@ -270,12 +294,13 @@ description: A test skill for resolver testing with enough characters to pass va
 
         // This will fail because GitHub won't have it either, but it should
         // cascade past local repo without panicking
-        let result = resolve_and_install(&config, &options);
+        let result = resolve_and_install(&config, &options, &out);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_local_only_fails_when_not_found() {
+        let out = test_output();
         let tmp = TempDir::new().unwrap();
         let local_path = tmp.path().join("local");
         std::fs::create_dir_all(&local_path).unwrap();
@@ -305,12 +330,13 @@ description: A test skill for resolver testing with enough characters to pass va
             github_only: false,
         };
 
-        let result = resolve_and_install(&config, &options);
+        let result = resolve_and_install(&config, &options, &out);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_no_config_falls_through_to_github() {
+        let out = test_output();
         let tmp = TempDir::new().unwrap();
         let install_dir = tmp.path().join("installed");
 
@@ -327,7 +353,7 @@ description: A test skill for resolver testing with enough characters to pass va
         };
 
         // Should fail at GitHub (no such release), but shouldn't panic
-        let result = resolve_and_install(&config, &options);
+        let result = resolve_and_install(&config, &options, &out);
         assert!(result.is_err());
     }
 }

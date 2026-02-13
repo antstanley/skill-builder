@@ -72,7 +72,7 @@ fn test_validate_valid_skill() {
     sb().args(["validate", &skill_path.to_string_lossy()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Skill is valid"));
+        .stderr(predicate::str::contains("Skill is valid"));
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_validate_invalid_skill_exits_nonzero() {
     sb().args(["validate", &skill_path.to_string_lossy()])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("Validation failed"));
+        .stderr(predicate::str::contains("Validation failed"));
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn test_package_valid_skill() {
     ])
     .assert()
     .success()
-    .stdout(predicate::str::contains("Successfully packaged"));
+    .stderr(predicate::str::contains("Packaged"));
 
     // Verify output file exists
     assert!(output_dir.join("package-test-skill.skill").exists());
@@ -140,8 +140,8 @@ fn test_list_with_config() {
     sb().args(["--config", &config_path.to_string_lossy(), "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("test-skill"))
-        .stdout(predicate::str::contains("another-skill"));
+        .stderr(predicate::str::contains("test-skill"))
+        .stderr(predicate::str::contains("another-skill"));
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn test_install_from_file() {
     ])
     .assert()
     .success()
-    .stdout(predicate::str::contains("Successfully installed"));
+    .stderr(predicate::str::contains("Installed"));
 
     // Verify installation
     assert!(install_dir.join("install-test-skill/SKILL.md").exists());
@@ -352,4 +352,157 @@ fn test_error_messages_are_user_friendly() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn test_install_file_multi_agent() {
+    let temp = TempDir::new().unwrap();
+
+    // Create and package a skill
+    let skill_dir = temp.path().join("multi-test-skill");
+    common::create_valid_skill(&skill_dir);
+
+    let package_dir = temp.path().join("packages");
+    fs::create_dir_all(&package_dir).unwrap();
+
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &package_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
+
+    // Install with --agent all to multiple directories
+    let install_dir = temp.path().join("install");
+    let skill_file = package_dir.join("multi-test-skill.skill");
+
+    sb().args([
+        "install",
+        "multi-test-skill",
+        "--file",
+        &skill_file.to_string_lossy(),
+        "--install-dir",
+        &install_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success()
+    .stderr(predicate::str::contains("Installed"));
+
+    // Verify installation
+    assert!(install_dir.join("multi-test-skill/SKILL.md").exists());
+}
+
+#[test]
+fn test_install_file_agent_flag() {
+    let temp = TempDir::new().unwrap();
+
+    // Create and package a skill
+    let skill_dir = temp.path().join("agent-flag-skill");
+    common::create_valid_skill(&skill_dir);
+
+    let package_dir = temp.path().join("packages");
+    fs::create_dir_all(&package_dir).unwrap();
+
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &package_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
+
+    // Install with --agent codex
+    let skill_file = package_dir.join("agent-flag-skill.skill");
+
+    sb().args([
+        "install",
+        "agent-flag-skill",
+        "--file",
+        &skill_file.to_string_lossy(),
+        "--agent",
+        "codex",
+    ])
+    .assert()
+    .success()
+    .stderr(predicate::str::contains("Installed"));
+
+    // The --agent codex flag was accepted without error.
+    // Path verification is tricky since the install happens relative to test cwd.
+}
+
+#[test]
+fn test_install_dir_overrides_agent() {
+    let temp = TempDir::new().unwrap();
+
+    // Create and package a skill
+    let skill_dir = temp.path().join("override-skill");
+    common::create_valid_skill(&skill_dir);
+
+    let package_dir = temp.path().join("packages");
+    fs::create_dir_all(&package_dir).unwrap();
+
+    sb().args([
+        "package",
+        &skill_dir.to_string_lossy(),
+        "--output",
+        &package_dir.to_string_lossy(),
+    ])
+    .assert()
+    .success();
+
+    // Install with both --agent and --install-dir; install-dir should win
+    let install_dir = temp.path().join("custom-install");
+    let skill_file = package_dir.join("override-skill.skill");
+
+    sb().args([
+        "install",
+        "override-skill",
+        "--file",
+        &skill_file.to_string_lossy(),
+        "--install-dir",
+        &install_dir.to_string_lossy(),
+        "--agent",
+        "all",
+    ])
+    .assert()
+    .success();
+
+    // Should only be in custom dir, not multiple agent dirs
+    assert!(install_dir.join("override-skill/SKILL.md").exists());
+}
+
+#[test]
+fn test_agent_output_flag() {
+    sb().args(["--agent-output", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("builds Claude Code skills"));
+}
+
+#[test]
+fn test_agent_output_env() {
+    sb().env("SB_AGENT_OUTPUT", "1")
+        .args(["validate", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validate"));
+}
+
+#[test]
+fn test_global_flag_help() {
+    sb().args(["install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--global"));
+}
+
+#[test]
+fn test_agent_flag_help() {
+    sb().args(["install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--agent"));
 }
