@@ -16,6 +16,10 @@ pub struct LocalStorageClient {
 
 impl LocalStorageClient {
     /// Create a new client, creating the root directory if it doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the root directory cannot be created.
     pub fn new(root: &Path) -> Result<Self> {
         fs::create_dir_all(root).with_context(|| {
             format!(

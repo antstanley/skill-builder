@@ -29,6 +29,10 @@ pub struct SkillConfig {
 
 impl SkillConfig {
     /// Get the base URL, deriving it from `llms_txt_url` if not explicitly set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `llms_txt_url` cannot be parsed as a URL.
     pub fn get_base_url(&self) -> Result<String> {
         if let Some(ref base) = self.base_url {
             return Ok(base.clone());
@@ -142,7 +146,7 @@ pub fn global_config_path() -> PathBuf {
 }
 
 /// Root configuration structure containing all skills.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     /// List of skill configurations.
     #[serde(default)]
@@ -155,6 +159,10 @@ pub struct Config {
 
 impl Config {
     /// Load configuration from a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or contains invalid JSON.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
@@ -164,6 +172,10 @@ impl Config {
     }
 
     /// Parse configuration from a JSON string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JSON is invalid or missing required fields.
     pub fn parse(content: &str) -> Result<Self> {
         serde_json::from_str(content).context("Failed to parse config JSON")
     }
@@ -194,12 +206,16 @@ impl Config {
 
         // Repository: other replaces entirely if present
         if other.repository.is_some() {
-            self.repository = other.repository.clone();
+            self.repository.clone_from(&other.repository);
         }
     }
 
     /// Load config with fallback hierarchy:
     /// CLI --config flag → Project skills.json (if exists) → Global config (if exists) → Built-in defaults
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a config file exists but cannot be read or parsed.
     pub fn load_with_fallback(config_path: Option<&Path>) -> Result<Self> {
         // If explicit config path provided, load it directly
         if let Some(path) = config_path {

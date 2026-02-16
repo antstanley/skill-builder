@@ -22,6 +22,10 @@ fn create_client() -> Result<Client> {
 }
 
 /// Download content from a URL.
+///
+/// # Errors
+///
+/// Returns an error if the HTTP request fails or returns a non-success status.
 pub fn download_url(client: &Client, url: &str) -> Result<String> {
     let response = client
         .get(url)
@@ -38,7 +42,11 @@ pub fn download_url(client: &Client, url: &str) -> Result<String> {
 }
 
 /// Extract all .md URLs from llms.txt content.
-#[must_use] 
+///
+/// # Panics
+///
+/// Panics if the hardcoded regex pattern is invalid (should never happen).
+#[must_use]
 pub fn extract_urls(content: &str) -> Vec<String> {
     let re = Regex::new(r"https?://[^\s\)>\]]+\.md").unwrap();
     let urls: HashSet<String> = re
@@ -97,6 +105,10 @@ pub fn detect_path_prefix(urls: &[String]) -> Option<String> {
 }
 
 /// Convert a URL to a local file path within the source directory.
+///
+/// # Errors
+///
+/// Returns an error if the URL cannot be parsed.
 pub fn url_to_local_path(url: &str, path_prefix: Option<&str>) -> Result<PathBuf> {
     let parsed = Url::parse(url).with_context(|| format!("Invalid URL: {url}"))?;
     let mut path = parsed.path().to_string();
@@ -139,6 +151,10 @@ pub struct DownloadResult {
 }
 
 /// Download all documentation for a skill.
+///
+/// # Errors
+///
+/// Returns an error if the llms.txt cannot be fetched or local files cannot be written.
 pub fn download_skill_docs(
     skill: &SkillConfig,
     source_dir: &Path,
@@ -234,6 +250,10 @@ pub fn download_skill_docs(
 }
 
 /// Download docs from a URL without a config file.
+///
+/// # Errors
+///
+/// Returns an error if the download or file writing fails.
 pub fn download_from_url(
     url: &str,
     name: &str,

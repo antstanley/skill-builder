@@ -10,6 +10,10 @@ use crate::config::{
 use crate::output::Output;
 
 /// Run the interactive init command.
+///
+/// # Errors
+///
+/// Returns an error if the config directory or file cannot be created.
 pub fn run_init(output: &Output) -> Result<()> {
     let config_path = global_config_path();
     let config_dir = global_config_dir();

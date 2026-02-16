@@ -43,6 +43,10 @@ pub struct ResolvedInstall {
 /// 3. GitHub releases (fallback)
 ///
 /// Explicit flags (`--local`, `--remote`, `--github`) skip the cascade.
+///
+/// # Errors
+///
+/// Returns an error if the skill cannot be found or installed from any source.
 pub fn resolve_and_install(
     config: &Config,
     options: &InstallOptions,

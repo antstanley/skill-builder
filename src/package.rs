@@ -43,8 +43,6 @@ fn should_skip(path: &Path) -> bool {
 
 /// Collect all files to include in the package.
 fn collect_files(skill_path: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-
     fn visit_dir(dir: &Path, base: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
@@ -64,6 +62,7 @@ fn collect_files(skill_path: &Path) -> Result<Vec<PathBuf>> {
         Ok(())
     }
 
+    let mut files = Vec::new();
     visit_dir(skill_path, skill_path, &mut files)?;
     files.sort();
 
@@ -79,6 +78,10 @@ pub struct PackageResult {
 }
 
 /// Package a skill directory into a .skill file (silent output for internal use).
+///
+/// # Errors
+///
+/// Returns an error if validation fails or packaging encounters I/O errors.
 pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
@@ -88,6 +91,10 @@ pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
 }
 
 /// Package a skill directory into a .skill file with output.
+///
+/// # Errors
+///
+/// Returns an error if validation fails or packaging encounters I/O errors.
 pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
@@ -165,6 +172,10 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
 }
 
 /// List contents of a .skill file.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or is not a valid zip archive.
 pub fn list_skill_contents<P: AsRef<Path>>(skill_file: P) -> Result<Vec<String>> {
     let skill_file = skill_file.as_ref();
     let file = File::open(skill_file)?;

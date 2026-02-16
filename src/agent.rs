@@ -55,7 +55,7 @@ impl AgentFramework {
     }
 
     /// Directory markers that indicate this agent is configured in a project.
-    const fn project_dir_markers(&self) -> &'static [&'static str] {
+    const fn project_dir_markers(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude"],
             Self::OpenCode => &[".opencode"],
@@ -65,7 +65,7 @@ impl AgentFramework {
     }
 
     /// File markers that indicate this agent is configured in a project.
-    const fn project_file_markers(&self) -> &'static [&'static str] {
+    const fn project_file_markers(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &["CLAUDE.md"],
             Self::OpenCode => &["opencode.json"],
@@ -75,7 +75,7 @@ impl AgentFramework {
     }
 
     /// Directory markers for global detection (relative to home).
-    const fn global_dir_markers(&self) -> &'static [&'static str] {
+    const fn global_dir_markers(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude"],
             Self::OpenCode => &[".config/opencode"],
@@ -94,6 +94,10 @@ pub enum AgentTarget {
 }
 
 /// Parse an `--agent` flag value into an `AgentTarget`.
+///
+/// # Errors
+///
+/// Returns an error if the value is not a recognized agent name.
 pub fn parse_agent_flag(value: Option<&str>) -> anyhow::Result<AgentTarget> {
     match value {
         None => Ok(AgentTarget::Auto),

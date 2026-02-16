@@ -4,6 +4,9 @@ use console::Style;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
+const SPINNER_TEMPLATE: &str = "  {spinner:.green} {msg}";
+const PROGRESS_TEMPLATE: &str = "  {msg} [{bar:30.green/dim}] {pos}/{len}";
+
 /// Output handler that adapts between rich human output and structured agent output.
 pub struct Output {
     agent_mode: bool,
@@ -118,7 +121,11 @@ impl Output {
     /// Create a spinner with a message.
     ///
     /// In agent mode, just prints the message and returns a hidden progress bar.
-    #[must_use] 
+    ///
+    /// # Panics
+    ///
+    /// Panics if the hardcoded spinner template is invalid (should never happen).
+    #[must_use]
     pub fn spinner(&self, msg: &str) -> ProgressBar {
         if self.agent_mode || self.no_color || !self.term.is_term() {
             let _ = self.term.write_line(&if self.agent_mode {
@@ -130,7 +137,7 @@ impl Output {
         } else {
             let pb = ProgressBar::new_spinner();
             pb.set_style(
-                ProgressStyle::with_template("  {spinner:.green} {msg}")
+                ProgressStyle::with_template(SPINNER_TEMPLATE)
                     .unwrap()
                     .tick_chars("\u{25d0}\u{25d3}\u{25d1}\u{25d2}\u{2713}"),
             );
@@ -143,7 +150,11 @@ impl Output {
     /// Create a progress bar with a length and message.
     ///
     /// In agent mode, just prints the message and returns a hidden progress bar.
-    #[must_use] 
+    ///
+    /// # Panics
+    ///
+    /// Panics if the hardcoded progress template is invalid (should never happen).
+    #[must_use]
     pub fn progress_bar(&self, len: u64, msg: &str) -> ProgressBar {
         if self.agent_mode || self.no_color || !self.term.is_term() {
             let _ = self.term.write_line(&if self.agent_mode {
@@ -155,7 +166,7 @@ impl Output {
         } else {
             let pb = ProgressBar::new(len);
             pb.set_style(
-                ProgressStyle::with_template("  {msg} [{bar:30.green/dim}] {pos}/{len}")
+                ProgressStyle::with_template(PROGRESS_TEMPLATE)
                     .unwrap()
                     .progress_chars("\u{2588}\u{2591} "),
             );

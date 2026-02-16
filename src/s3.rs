@@ -16,6 +16,10 @@ pub struct S3Client {
 
 impl S3Client {
     /// Create a new S3 client from repository configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bucket name is missing, region is invalid, or credentials fail.
     pub fn new(config: &RepositoryConfig) -> Result<Self> {
         let bucket_name = config
             .bucket_name

@@ -134,7 +134,7 @@ fn compare_semver(a: &str, b: &str) -> std::cmp::Ordering {
         let pa = va.get(i).copied().unwrap_or(0);
         let pb = vb.get(i).copied().unwrap_or(0);
         match pa.cmp(&pb) {
-            std::cmp::Ordering::Equal => continue,
+            std::cmp::Ordering::Equal => {}
             other => return other,
         }
     }
@@ -142,6 +142,10 @@ fn compare_semver(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 /// Load the skills index from S3. Returns an empty index if not found.
+///
+/// # Errors
+///
+/// Returns an error if the index exists but cannot be parsed.
 pub fn load_index<S: StorageOperations>(client: &S) -> Result<SkillsIndex> {
     match client.get_object(INDEX_KEY) {
         Ok(data) => {
@@ -153,6 +157,10 @@ pub fn load_index<S: StorageOperations>(client: &S) -> Result<SkillsIndex> {
 }
 
 /// Save the skills index to S3.
+///
+/// # Errors
+///
+/// Returns an error if the index cannot be serialized or written to storage.
 pub fn save_index<S: StorageOperations>(client: &S, index: &SkillsIndex) -> Result<()> {
     let json = serde_json::to_string_pretty(index).context("Failed to serialize skills index")?;
     client.put_object(INDEX_KEY, json.as_bytes())

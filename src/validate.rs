@@ -180,17 +180,14 @@ pub fn validate_skill<P: AsRef<Path>>(skill_path: P) -> ValidationResult {
 pub fn print_validation_result(result: &ValidationResult, output: &crate::output::Output) {
     if result.valid {
         output.status("Valid", "Skill is valid!");
-        for warning in &result.warnings {
-            output.warn(warning);
-        }
     } else {
         output.error("Validation failed:");
         for error in &result.errors {
             output.step(&format!("- {error}"));
         }
-        for warning in &result.warnings {
-            output.warn(warning);
-        }
+    }
+    for warning in &result.warnings {
+        output.warn(warning);
     }
 }
 

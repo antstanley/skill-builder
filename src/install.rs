@@ -30,14 +30,10 @@ fn create_client() -> Result<Client> {
 pub fn get_release_url(skill_name: &str, version: Option<&str>, repo: Option<&str>) -> String {
     let repo = repo.unwrap_or(DEFAULT_REPO);
 
-    match version {
-        Some(v) => format!(
-            "https://github.com/{repo}/releases/download/v{v}/{skill_name}.skill"
-        ),
-        None => format!(
-            "https://github.com/{repo}/releases/latest/download/{skill_name}.skill"
-        ),
-    }
+    version.map_or_else(
+        || format!("https://github.com/{repo}/releases/latest/download/{skill_name}.skill"),
+        |v| format!("https://github.com/{repo}/releases/download/v{v}/{skill_name}.skill"),
+    )
 }
 
 /// Installation result.
@@ -90,6 +86,10 @@ fn extract_archive<R: Read + std::io::Seek>(
 }
 
 /// Download and extract a skill from GitHub releases.
+///
+/// # Errors
+///
+/// Returns an error if the download or extraction fails.
 pub fn install_skill(
     skill_name: &str,
     version: Option<&str>,
@@ -142,6 +142,10 @@ pub fn install_skill(
 }
 
 /// Install a skill from a local .skill file.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or extracted.
 pub fn install_from_file<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_file: P,
     install_dir: Q,

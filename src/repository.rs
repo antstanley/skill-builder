@@ -49,6 +49,10 @@ impl<S: StorageOperations> Repository<S> {
 
 impl Repository<S3Client> {
     /// Create a repository from config, with optional local cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the S3 client cannot be created.
     pub fn from_config(repo_config: &RepositoryConfig) -> Result<Self> {
         let client = S3Client::new(repo_config)?;
         if repo_config.local_is_cache() {
@@ -63,6 +67,10 @@ impl Repository<S3Client> {
 
 impl<S: StorageOperations> Repository<S> {
     /// Upload a skill to the repository.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the skill file cannot be read or uploaded to storage.
     pub fn upload(&self, params: &UploadParams, output: &Output) -> Result<()> {
         let skill_data = std::fs::read(params.skill_file).with_context(|| {
             format!("Failed to read skill file: {}", params.skill_file.display())
@@ -116,6 +124,10 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// Download a skill, using local cache when available. Returns path to the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the skill is not found or cannot be downloaded.
     pub fn download(
         &self,
         name: &str,
@@ -169,6 +181,10 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// Download and install a skill.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the download or installation fails.
     pub fn install(
         &self,
         name: &str,
@@ -182,6 +198,10 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// Delete a skill version (or all versions) from the repository.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index cannot be loaded or saved.
     pub fn delete(&self, name: &str, version: Option<&str>, output: &Output) -> Result<()> {
         let mut index = load_index(&self.client)?;
 
@@ -234,6 +254,10 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// List all skills in the repository.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index cannot be loaded from storage.
     pub fn list(&self, skill_filter: Option<&str>) -> Result<SkillsIndex> {
         let index = load_index(&self.client)?;
 
@@ -251,10 +275,10 @@ impl<S: StorageOperations> Repository<S> {
 
 /// Write skill data to output directory or a temp file.
 fn write_output(name: &str, data: &[u8], output_dir: Option<&Path>) -> Result<PathBuf> {
-    let dir = match output_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::temp_dir().join("skill-builder"),
-    };
+    let dir = output_dir.map_or_else(
+        || std::env::temp_dir().join("skill-builder"),
+        Path::to_path_buf,
+    );
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{name}.skill"));
     std::fs::write(&dest, data)?;
@@ -263,14 +287,6 @@ fn write_output(name: &str, data: &[u8], output_dir: Option<&Path>) -> Result<Pa
 
 /// Create a zip archive of a source directory.
 fn create_source_archive(source_dir: &Path, name: &str) -> Result<Vec<u8>> {
-    let buffer = Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(buffer);
-
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    let base = source_dir.to_path_buf();
-
     fn add_dir_to_zip(
         zip: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
         dir: &Path,
@@ -298,6 +314,13 @@ fn create_source_archive(source_dir: &Path, name: &str) -> Result<Vec<u8>> {
         Ok(())
     }
 
+    let buffer = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(buffer);
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let base = source_dir.to_path_buf();
     let prefix = format!("{name}-source");
     add_dir_to_zip(&mut zip, &base, &base, &prefix, options)?;
 

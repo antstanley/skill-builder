@@ -302,7 +302,7 @@ enum LocalAction {
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {:#}", e);
+        eprintln!("Error: {e:#}");
         process::exit(1);
     }
 }
@@ -319,70 +319,19 @@ fn run() -> Result<()> {
             name,
             source_dir,
         } => {
-            // Handle --url override (no config needed)
-            if let Some(url) = url {
-                let name = name.context("--name is required when using --url")?;
-                output.info(&format!("Downloading from URL: {}", url));
-                output.step(&format!("Skill name: {}", name));
-                output.newline();
-
-                let results = download_from_url(&url, &name, &source_dir, &output)?;
-                let failures: Vec<_> = results.iter().filter(|r| !r.success).collect();
-
-                if !failures.is_empty() {
-                    anyhow::bail!("{} files failed to download", failures.len());
-                }
-
-                return Ok(());
-            }
-
-            // Load config
-            let config = Config::load_with_fallback(cli.config.as_deref())?;
-
-            if all {
-                // Download all skills
-                output.header(&format!(
-                    "Downloading all {} skills...",
-                    config.skills.len()
-                ));
-                output.newline();
-
-                for skill in &config.skills {
-                    output.header(&format!("=== {} ===", skill.name));
-                    if let Err(e) = download_skill_docs(skill, &source_dir, &output) {
-                        output.error(&format!("Failed to download {}: {}", skill.name, e));
-                    }
-                    output.newline();
-                }
-            } else if let Some(name) = skill_name {
-                // Download specific skill
-                let skill = config
-                    .find_skill(&name)
-                    .with_context(|| format!("Skill '{}' not found in config", name))?;
-
-                let results = download_skill_docs(skill, &source_dir, &output)?;
-                let failures: Vec<_> = results.iter().filter(|r| !r.success).collect();
-
-                if !failures.is_empty() {
-                    anyhow::bail!("{} files failed to download", failures.len());
-                }
-            } else {
-                anyhow::bail!("Please specify a skill name, --all, or --url with --name");
-            }
+            handle_download(
+                skill_name,
+                all,
+                url,
+                name,
+                &source_dir,
+                cli.config.as_deref(),
+                &output,
+            )?;
         }
 
         Commands::Validate { skill, skills_dir } => {
-            // Determine skill path
-            let skill_path = if PathBuf::from(&skill).exists() {
-                PathBuf::from(&skill)
-            } else {
-                skills_dir.join(&skill)
-            };
-
-            if !skill_path.exists() {
-                anyhow::bail!("Skill directory not found: {}", skill_path.display());
-            }
-
+            let skill_path = resolve_skill_path(&skill, &skills_dir)?;
             output.info(&format!("Validating: {}", skill_path.display()));
             output.newline();
 
@@ -399,17 +348,7 @@ fn run() -> Result<()> {
             output: output_dir,
             skills_dir,
         } => {
-            // Determine skill path
-            let skill_path = if PathBuf::from(&skill).exists() {
-                PathBuf::from(&skill)
-            } else {
-                skills_dir.join(&skill)
-            };
-
-            if !skill_path.exists() {
-                anyhow::bail!("Skill directory not found: {}", skill_path.display());
-            }
-
+            let skill_path = resolve_skill_path(&skill, &skills_dir)?;
             skill_builder::package::package_skill_with_output(&skill_path, &output_dir, &output)?;
         }
 
@@ -425,62 +364,33 @@ fn run() -> Result<()> {
             agent,
             global,
         } => {
-            // Resolve target directories
-            let agent_target = skill_builder::agent::parse_agent_flag(agent.as_deref())?;
-            let install_dirs = skill_builder::agent::resolve_install_dirs(
-                &agent_target,
-                install_dir.as_deref(),
-                global,
-                std::path::Path::new("."),
-            );
-
-            if let Some(file_path) = file {
-                // Install from local file to each target directory
-                for dir in &install_dirs {
-                    output.info(&format!("Installing to {}", dir.display()));
-                    install_from_file(&file_path, dir, &output)?;
-                }
+            let source = if local {
+                SourceFilter::Local
+            } else if remote {
+                SourceFilter::Remote
+            } else if github {
+                SourceFilter::GitHub
             } else {
-                // Use the install resolver for source cascade
-                let config = Config::load_with_fallback(cli.config.as_deref())?;
-                for dir in &install_dirs {
-                    output.info(&format!("Installing to {}", dir.display()));
-                    let options = skill_builder::install_resolver::InstallOptions {
-                        skill_name: &skill,
-                        version: version.as_deref(),
-                        github_repo: repo.as_deref(),
-                        install_dir: dir,
-                        local_only: local,
-                        remote_only: remote,
-                        github_only: github,
-                    };
-                    skill_builder::install_resolver::resolve_and_install(
-                        &config, &options, &output,
-                    )?;
-                }
-            }
+                SourceFilter::Auto
+            };
+            handle_install(
+                InstallArgs {
+                    skill,
+                    version,
+                    repo,
+                    file,
+                    source,
+                    install_dir,
+                    agent,
+                    global,
+                },
+                cli.config.as_deref(),
+                &output,
+            )?;
         }
 
         Commands::List => {
-            let config = Config::load_with_fallback(cli.config.as_deref())?;
-
-            if config.skills.is_empty() {
-                output.info("No skills configured.");
-            } else {
-                output.header("Configured skills:");
-                output.newline();
-                let mut rows = Vec::new();
-                for skill in &config.skills {
-                    let desc = if skill.description.chars().count() > 60 {
-                        let truncated: String = skill.description.chars().take(60).collect();
-                        format!("{}...", truncated)
-                    } else {
-                        skill.description.clone()
-                    };
-                    rows.push(vec![skill.name.clone(), skill.llms_txt_url.clone(), desc]);
-                }
-                output.table(&rows);
-            }
+            handle_list(cli.config.as_deref(), &output)?;
         }
 
         Commands::Repo { action } => {
@@ -495,6 +405,212 @@ fn run() -> Result<()> {
             skill_builder::init::run_init(&output)?;
         }
     }
+
+    Ok(())
+}
+
+fn resolve_skill_path(skill: &str, skills_dir: &std::path::Path) -> Result<PathBuf> {
+    let skill_path = if PathBuf::from(skill).exists() {
+        PathBuf::from(skill)
+    } else {
+        skills_dir.join(skill)
+    };
+
+    if !skill_path.exists() {
+        anyhow::bail!("Skill directory not found: {}", skill_path.display());
+    }
+
+    Ok(skill_path)
+}
+
+fn handle_list(config_path: Option<&std::path::Path>, output: &Output) -> Result<()> {
+    let config = Config::load_with_fallback(config_path)?;
+
+    if config.skills.is_empty() {
+        output.info("No skills configured.");
+    } else {
+        output.header("Configured skills:");
+        output.newline();
+        let mut rows = Vec::new();
+        for skill in &config.skills {
+            let desc = if skill.description.chars().count() > 60 {
+                let truncated: String = skill.description.chars().take(60).collect();
+                format!("{truncated}...")
+            } else {
+                skill.description.clone()
+            };
+            rows.push(vec![skill.name.clone(), skill.llms_txt_url.clone(), desc]);
+        }
+        output.table(&rows);
+    }
+
+    Ok(())
+}
+
+fn handle_download(
+    skill_name: Option<String>,
+    all: bool,
+    url: Option<String>,
+    name: Option<String>,
+    source_dir: &std::path::Path,
+    config_path: Option<&std::path::Path>,
+    output: &Output,
+) -> Result<()> {
+    // Handle --url override (no config needed)
+    if let Some(url) = url {
+        let name = name.context("--name is required when using --url")?;
+        output.info(&format!("Downloading from URL: {url}"));
+        output.step(&format!("Skill name: {name}"));
+        output.newline();
+
+        let results = download_from_url(&url, &name, source_dir, output)?;
+        let failures: Vec<_> = results.iter().filter(|r| !r.success).collect();
+
+        if !failures.is_empty() {
+            anyhow::bail!("{} files failed to download", failures.len());
+        }
+
+        return Ok(());
+    }
+
+    // Load config
+    let config = Config::load_with_fallback(config_path)?;
+
+    if all {
+        // Download all skills
+        output.header(&format!(
+            "Downloading all {} skills...",
+            config.skills.len()
+        ));
+        output.newline();
+
+        for skill in &config.skills {
+            output.header(&format!("=== {} ===", skill.name));
+            if let Err(e) = download_skill_docs(skill, source_dir, output) {
+                output.error(&format!("Failed to download {}: {}", skill.name, e));
+            }
+            output.newline();
+        }
+    } else if let Some(name) = skill_name {
+        // Download specific skill
+        let skill = config
+            .find_skill(&name)
+            .with_context(|| format!("Skill '{name}' not found in config"))?;
+
+        let results = download_skill_docs(skill, source_dir, output)?;
+        let failures: Vec<_> = results.iter().filter(|r| !r.success).collect();
+
+        if !failures.is_empty() {
+            anyhow::bail!("{} files failed to download", failures.len());
+        }
+    } else {
+        anyhow::bail!("Please specify a skill name, --all, or --url with --name");
+    }
+
+    Ok(())
+}
+
+enum SourceFilter {
+    Auto,
+    Local,
+    Remote,
+    GitHub,
+}
+
+struct InstallArgs {
+    skill: String,
+    version: Option<String>,
+    repo: Option<String>,
+    file: Option<PathBuf>,
+    source: SourceFilter,
+    install_dir: Option<PathBuf>,
+    agent: Option<String>,
+    global: bool,
+}
+
+fn handle_install(
+    args: InstallArgs,
+    config_path: Option<&std::path::Path>,
+    output: &Output,
+) -> Result<()> {
+    // Resolve target directories
+    let agent_target = skill_builder::agent::parse_agent_flag(args.agent.as_deref())?;
+    let install_dirs = skill_builder::agent::resolve_install_dirs(
+        &agent_target,
+        args.install_dir.as_deref(),
+        args.global,
+        std::path::Path::new("."),
+    );
+
+    if let Some(file_path) = args.file {
+        // Install from local file to each target directory
+        for dir in &install_dirs {
+            output.info(&format!("Installing to {}", dir.display()));
+            install_from_file(&file_path, dir, output)?;
+        }
+    } else {
+        // Use the install resolver for source cascade
+        let config = Config::load_with_fallback(config_path)?;
+        for dir in &install_dirs {
+            output.info(&format!("Installing to {}", dir.display()));
+            let options = skill_builder::install_resolver::InstallOptions {
+                skill_name: &args.skill,
+                version: args.version.as_deref(),
+                github_repo: args.repo.as_deref(),
+                install_dir: dir,
+                local_only: matches!(args.source, SourceFilter::Local),
+                remote_only: matches!(args.source, SourceFilter::Remote),
+                github_only: matches!(args.source, SourceFilter::GitHub),
+            };
+            skill_builder::install_resolver::resolve_and_install(&config, &options, output)?;
+        }
+    }
+
+    Ok(())
+}
+
+struct RepoUploadArgs {
+    skill: String,
+    version: String,
+    file: Option<PathBuf>,
+    changelog: Option<PathBuf>,
+    source_dir: Option<PathBuf>,
+}
+
+fn handle_repo_upload<S: StorageOperations>(
+    args: &RepoUploadArgs,
+    config: &Config,
+    repo: &Repository<S>,
+    output: &Output,
+) -> Result<()> {
+    let skill_file = args
+        .file
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(format!("dist/{}.skill", args.skill)));
+
+    if !skill_file.exists() {
+        anyhow::bail!("Skill file not found: {}", skill_file.display());
+    }
+
+    // Look up skill info from config
+    let skill_config = config.find_skill(&args.skill);
+    let description = skill_config.map_or("", |s| s.description.as_str());
+    let llms_txt_url = skill_config.map_or("", |s| s.llms_txt_url.as_str());
+
+    output.header(&format!("Uploading {} v{}...", args.skill, args.version));
+    repo.upload(
+        &UploadParams {
+            name: &args.skill,
+            version: &args.version,
+            description,
+            llms_txt_url,
+            skill_file: &skill_file,
+            changelog: args.changelog.as_deref(),
+            source_dir: args.source_dir.as_deref(),
+        },
+        output,
+    )?;
+    output.status("Done", &format!("Uploaded {} v{}", args.skill, args.version));
 
     Ok(())
 }
@@ -520,36 +636,18 @@ fn handle_repo_command(
             changelog,
             source_dir,
         } => {
-            let skill_file = if let Some(f) = file {
-                f
-            } else {
-                // Default to dist/<skill>.skill
-                PathBuf::from(format!("dist/{}.skill", skill))
-            };
-
-            if !skill_file.exists() {
-                anyhow::bail!("Skill file not found: {}", skill_file.display());
-            }
-
-            // Look up skill info from config
-            let skill_config = config.find_skill(&skill);
-            let description = skill_config.map(|s| s.description.as_str()).unwrap_or("");
-            let llms_txt_url = skill_config.map(|s| s.llms_txt_url.as_str()).unwrap_or("");
-
-            output.header(&format!("Uploading {} v{}...", skill, version));
-            repo.upload(
-                &UploadParams {
-                    name: &skill,
-                    version: &version,
-                    description,
-                    llms_txt_url,
-                    skill_file: &skill_file,
-                    changelog: changelog.as_deref(),
-                    source_dir: source_dir.as_deref(),
+            handle_repo_upload(
+                &RepoUploadArgs {
+                    skill,
+                    version,
+                    file,
+                    changelog,
+                    source_dir,
                 },
+                &config,
+                &repo,
                 output,
             )?;
-            output.status("Done", &format!("Uploaded {} v{}", skill, version));
         }
 
         RepoAction::Download {
@@ -587,21 +685,19 @@ fn handle_repo_command(
             yes,
         } => {
             if !yes {
-                let target = if let Some(ref v) = version {
-                    format!("{} v{}", skill, v)
-                } else {
-                    format!("{} (all versions)", skill)
-                };
+                let target = version.as_ref().map_or_else(
+                    || format!("{skill} (all versions)"),
+                    |v| format!("{skill} v{v}"),
+                );
                 output.warn(&format!(
-                    "This will permanently delete {} from the repository. Use --yes to confirm.",
-                    target
+                    "This will permanently delete {target} from the repository. Use --yes to confirm."
                 ));
                 process::exit(1);
             }
 
-            output.header(&format!("Deleting {}...", skill));
+            output.header(&format!("Deleting {skill}..."));
             repo.delete(&skill, version.as_deref(), output)?;
-            output.status("Done", &format!("Deleted {}", skill));
+            output.status("Done", &format!("Deleted {skill}"));
         }
 
         RepoAction::List { skill } => {
@@ -618,8 +714,8 @@ fn handle_repo_command(
                         output.step(&format!("Source: {}", entry.llms_txt_url));
                     }
                     let mut versions: Vec<&str> =
-                        entry.versions.keys().map(|s| s.as_str()).collect();
-                    versions.sort();
+                        entry.versions.keys().map(String::as_str).collect();
+                    versions.sort_unstable();
                     versions.reverse();
                     output.step(&format!("Versions: {}", versions.join(", ")));
                 }
@@ -637,11 +733,10 @@ fn handle_local_command(
 ) -> Result<()> {
     let config = Config::load_with_fallback(config_path)?;
 
-    let local_path = config
-        .repository
-        .as_ref()
-        .map(|r| r.local_repo_path())
-        .unwrap_or_else(skill_builder::config::default_local_repo_path);
+    let local_path = config.repository.as_ref().map_or_else(
+        skill_builder::config::default_local_repo_path,
+        skill_builder::config::RepositoryConfig::local_repo_path,
+    );
 
     let client = LocalStorageClient::with_dir(&local_path);
 
@@ -655,11 +750,11 @@ fn handle_local_command(
                     let mut rows = Vec::new();
                     for entry in &index.skills {
                         let mut versions: Vec<&str> =
-                            entry.versions.keys().map(|s| s.as_str()).collect();
-                        versions.sort();
+                            entry.versions.keys().map(String::as_str).collect();
+                        versions.sort_unstable();
                         versions.reverse();
                         for ver in &versions {
-                            rows.push(vec![entry.name.clone(), format!("v{}", ver)]);
+                            rows.push(vec![entry.name.clone(), format!("v{ver}")]);
                         }
                     }
                     output.table(&rows);
@@ -675,7 +770,10 @@ fn handle_local_command(
                         output.header("Local repository skills:");
                         output.newline();
                         for key in &keys {
-                            if key.ends_with(".skill") {
+                            if std::path::Path::new(key)
+                                .extension()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("skill"))
+                            {
                                 output.step(key);
                             }
                         }
@@ -687,19 +785,19 @@ fn handle_local_command(
 
         LocalAction::Clear { skill } => {
             if let Some(name) = skill {
-                let prefix = format!("skills/{}/", name);
+                let prefix = format!("skills/{name}/");
                 let keys = client.list_objects(&prefix).unwrap_or_default();
                 for key in &keys {
                     if let Err(e) = client.delete_object(key) {
-                        output.warn(&format!("Failed to delete {}: {}", key, e));
+                        output.warn(&format!("Failed to delete {key}: {e}"));
                     }
                 }
-                output.status("Cleared", &format!("local repository for {}", name));
+                output.status("Cleared", &format!("local repository for {name}"));
             } else {
                 let keys = client.list_objects("skills/").unwrap_or_default();
                 for key in &keys {
                     if let Err(e) = client.delete_object(key) {
-                        output.warn(&format!("Failed to delete {}: {}", key, e));
+                        output.warn(&format!("Failed to delete {key}: {e}"));
                     }
                 }
                 output.status("Cleared", "all skills from local repository");
