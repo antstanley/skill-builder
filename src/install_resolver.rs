@@ -177,7 +177,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_output() -> Output {
-        Output::new(true)
+        Output::new(true, false)
     }
 
     fn create_test_skill_in_local_repo(local_path: &Path) -> String {

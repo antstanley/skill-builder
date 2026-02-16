@@ -13,7 +13,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_output() -> Output {
-    Output::new(true)
+    Output::new(true, false)
 }
 
 #[tokio::test]

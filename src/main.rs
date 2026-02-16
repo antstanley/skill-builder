@@ -31,6 +31,10 @@ struct Cli {
     #[arg(short, long)]
     config: Option<PathBuf>,
 
+    /// Show verbose output including HTTP status codes and response bodies
+    #[arg(long, global = true)]
+    verbose: bool,
+
     /// Output plain text with prefixed lines for agent consumption
     #[arg(long, global = true)]
     agent_output: bool,
@@ -309,7 +313,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let output = Output::new(cli.agent_output);
+    let output = Output::new(cli.agent_output, cli.verbose);
 
     match cli.command {
         Commands::Download {
@@ -487,7 +491,7 @@ fn handle_download(
         for skill in &config.skills {
             output.header(&format!("=== {} ===", skill.name));
             if let Err(e) = download_skill_docs(skill, source_dir, output) {
-                output.error(&format!("Failed to download {}: {}", skill.name, e));
+                output.error(&format!("Failed to download {}: {e:#}", skill.name));
             }
             output.newline();
         }

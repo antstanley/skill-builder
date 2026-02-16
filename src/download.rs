@@ -23,22 +23,38 @@ fn create_client() -> Result<Client> {
 
 /// Download content from a URL.
 ///
+/// When `verbose` is true, HTTP error responses include a truncated response body.
+///
 /// # Errors
 ///
 /// Returns an error if the HTTP request fails or returns a non-success status.
-pub fn download_url(client: &Client, url: &str) -> Result<String> {
+pub fn download_url(client: &Client, url: &str, verbose: bool) -> Result<String> {
     let response = client
         .get(url)
         .send()
         .with_context(|| format!("Failed to fetch {url}"))?;
 
-    if !response.status().is_success() {
-        anyhow::bail!("HTTP {} for {}", response.status(), url);
+    let status = response.status();
+    let body = response
+        .text()
+        .with_context(|| format!("Failed to read response from {url}"))?;
+
+    if !status.is_success() {
+        if verbose && !body.is_empty() {
+            let preview: String = body.chars().take(500).collect();
+            let truncated = if body.chars().count() > 500 {
+                "... (truncated)"
+            } else {
+                ""
+            };
+            anyhow::bail!(
+                "HTTP {status} for {url}\n  Response body: {preview}{truncated}"
+            );
+        }
+        anyhow::bail!("HTTP {status} for {url}");
     }
 
-    response
-        .text()
-        .with_context(|| format!("Failed to read response from {url}"))
+    Ok(body)
 }
 
 /// Extract all .md URLs from llms.txt content.
@@ -164,7 +180,7 @@ pub fn download_skill_docs(
 
     let pb = output.spinner(&format!("Downloading llms.txt from {}", skill.llms_txt_url));
 
-    let llms_content = download_url(&client, &skill.llms_txt_url)?;
+    let llms_content = download_url(&client, &skill.llms_txt_url, output.is_verbose())?;
     let urls = extract_urls(&llms_content);
     pb.finish_and_clear();
 
@@ -209,7 +225,7 @@ pub fn download_skill_docs(
             fs::create_dir_all(parent)?;
         }
 
-        match download_url(&client, url) {
+        match download_url(&client, url, output.is_verbose()) {
             Ok(content) => {
                 fs::write(&full_path, &content)?;
                 results.push(DownloadResult {
@@ -220,13 +236,15 @@ pub fn download_skill_docs(
                 });
             }
             Err(e) => {
+                let error_msg = format!("{e:#}");
                 results.push(DownloadResult {
                     url: url.clone(),
                     local_path: local_path.clone(),
                     success: false,
-                    error: Some(e.to_string()),
+                    error: Some(error_msg.clone()),
                 });
                 output.warn(&format!("Failed: {}", local_path.display()));
+                output.verbose(&error_msg);
             }
         }
         progress.inc(1);

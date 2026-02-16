@@ -10,7 +10,7 @@ use std::fs;
 use tempfile::TempDir;
 
 fn test_output() -> Output {
-    Output::new(true)
+    Output::new(true, false)
 }
 
 fn setup() -> (Repository<MockS3Client>, TempDir) {

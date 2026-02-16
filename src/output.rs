@@ -10,6 +10,7 @@ const PROGRESS_TEMPLATE: &str = "  {msg} [{bar:30.green/dim}] {pos}/{len}";
 /// Output handler that adapts between rich human output and structured agent output.
 pub struct Output {
     agent_mode: bool,
+    verbose: bool,
     term: console::Term,
     no_color: bool,
 }
@@ -18,25 +19,50 @@ impl Output {
     /// Create a new Output instance.
     ///
     /// Agent mode activates if `agent_mode_flag` is true OR `SB_AGENT_OUTPUT=1` env var is set.
+    /// Verbose mode activates if `verbose_flag` is true OR `SB_VERBOSE=1` env var is set.
     /// Colors are disabled if `NO_COLOR` env var is set or stdout is not a TTY.
-    #[must_use] 
-    pub fn new(agent_mode_flag: bool) -> Self {
+    #[must_use]
+    pub fn new(agent_mode_flag: bool, verbose_flag: bool) -> Self {
         let term = console::Term::stderr();
         let agent_mode =
             agent_mode_flag || std::env::var("SB_AGENT_OUTPUT").unwrap_or_default() == "1";
+        let verbose =
+            verbose_flag || std::env::var("SB_VERBOSE").unwrap_or_default() == "1";
         let no_color = std::env::var("NO_COLOR").is_ok() || !console::colors_enabled();
 
         Self {
             agent_mode,
+            verbose,
             term,
             no_color,
         }
     }
 
     /// Whether agent output mode is active.
-    #[must_use] 
+    #[must_use]
     pub const fn is_agent_mode(&self) -> bool {
         self.agent_mode
+    }
+
+    /// Whether verbose output mode is active.
+    #[must_use]
+    pub const fn is_verbose(&self) -> bool {
+        self.verbose
+    }
+
+    /// Print a verbose-only debug message (no-op unless verbose mode is active).
+    pub fn verbose(&self, msg: &str) {
+        if !self.verbose {
+            return;
+        }
+        if self.agent_mode {
+            let _ = self.term.write_line(&format!("[DEBUG] {msg}"));
+        } else if self.no_color {
+            let _ = self.term.write_line(&format!("  [verbose] {msg}"));
+        } else {
+            let style = Style::new().dim();
+            let _ = self.term.write_line(&format!("  {}", style.apply_to(msg)));
+        }
     }
 
     /// Print a success status line.
@@ -217,19 +243,25 @@ mod tests {
 
     #[test]
     fn test_agent_mode_from_flag() {
-        let output = Output::new(true);
+        let output = Output::new(true, false);
         assert!(output.is_agent_mode());
     }
 
     #[test]
     fn test_human_mode_default() {
-        let output = Output::new(false);
+        let output = Output::new(false, false);
         assert!(!output.is_agent_mode());
     }
 
     #[test]
+    fn test_verbose_mode_from_flag() {
+        let output = Output::new(false, true);
+        assert!(output.is_verbose());
+    }
+
+    #[test]
     fn test_spinner_returns_hidden_in_agent_mode() {
-        let output = Output::new(true);
+        let output = Output::new(true, false);
         let pb = output.spinner("Loading...");
         // Hidden progress bar has length 0
         assert_eq!(pb.length(), None);
@@ -237,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_progress_bar_returns_hidden_in_agent_mode() {
-        let output = Output::new(true);
+        let output = Output::new(true, false);
         let pb = output.progress_bar(10, "Downloading");
         // In agent mode we get a hidden bar
         assert_eq!(pb.length(), None);

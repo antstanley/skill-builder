@@ -182,7 +182,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_output() -> Output {
-        Output::new(true)
+        Output::new(true, false)
     }
 
     #[test]

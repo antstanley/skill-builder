@@ -335,7 +335,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_output() -> Output {
-        Output::new(true) // Use agent mode in tests to avoid terminal issues
+        Output::new(true, false) // Use agent mode in tests to avoid terminal issues
     }
 
     fn setup() -> (Repository<MockS3Client>, TempDir) {

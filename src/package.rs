@@ -86,7 +86,7 @@ pub fn package_skill<P: AsRef<Path>, Q: AsRef<Path>>(
     skill_path: P,
     output_dir: Q,
 ) -> Result<PackageResult> {
-    let silent = Output::new(true);
+    let silent = Output::new(true, false);
     package_skill_with_output(skill_path, output_dir, &silent)
 }
 
