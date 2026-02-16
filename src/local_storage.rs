@@ -1,4 +1,4 @@
-//! Local filesystem implementation of StorageOperations.
+//! Local filesystem implementation of `StorageOperations`.
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::storage::StorageOperations;
 
-/// Filesystem-backed storage client implementing StorageOperations.
+/// Filesystem-backed storage client implementing `StorageOperations`.
 ///
 /// Maps S3-like keys to filesystem paths relative to a root directory.
 /// For example, key `"skills/foo/1.0.0/foo.skill"` becomes `{root}/skills/foo/1.0.0/foo.skill`.
@@ -29,6 +29,7 @@ impl LocalStorageClient {
     }
 
     /// Create a client without creating the directory (for testing).
+    #[must_use] 
     pub fn with_dir(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
@@ -36,6 +37,7 @@ impl LocalStorageClient {
     }
 
     /// Get the root directory path.
+    #[must_use] 
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -59,7 +61,7 @@ impl StorageOperations for LocalStorageClient {
 
     fn get_object(&self, key: &str) -> Result<Vec<u8>> {
         let path = self.key_to_path(key);
-        fs::read(&path).with_context(|| format!("Object not found: {}", key))
+        fs::read(&path).with_context(|| format!("Object not found: {key}"))
     }
 
     fn delete_object(&self, key: &str) -> Result<()> {

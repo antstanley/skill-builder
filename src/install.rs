@@ -26,17 +26,16 @@ fn create_client() -> Result<Client> {
 }
 
 /// Get the GitHub release download URL for a skill.
+#[must_use] 
 pub fn get_release_url(skill_name: &str, version: Option<&str>, repo: Option<&str>) -> String {
     let repo = repo.unwrap_or(DEFAULT_REPO);
 
     match version {
         Some(v) => format!(
-            "https://github.com/{}/releases/download/v{}/{}.skill",
-            repo, v, skill_name
+            "https://github.com/{repo}/releases/download/v{v}/{skill_name}.skill"
         ),
         None => format!(
-            "https://github.com/{}/releases/latest/download/{}.skill",
-            repo, skill_name
+            "https://github.com/{repo}/releases/latest/download/{skill_name}.skill"
         ),
     }
 }
@@ -49,7 +48,7 @@ pub struct InstallResult {
     pub files_extracted: usize,
 }
 
-/// Extract a zip archive into install_dir, returning (skill_name, skill_path, files_extracted).
+/// Extract a zip archive into `install_dir`, returning (`skill_name`, `skill_path`, `files_extracted`).
 fn extract_archive<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     install_dir: &Path,
@@ -100,23 +99,21 @@ pub fn install_skill(
 ) -> Result<InstallResult> {
     let client = create_client()?;
 
-    let install_dir = install_dir
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_INSTALL_DIR));
+    let install_dir = install_dir.map_or_else(|| PathBuf::from(DEFAULT_INSTALL_DIR), std::path::Path::to_path_buf);
 
     let url = get_release_url(skill_name, version, repo);
 
-    output.header(&format!("Installing {} skill...", skill_name));
+    output.header(&format!("Installing {skill_name} skill..."));
     let ver_str = version.unwrap_or("latest");
-    output.step(&format!("Version: {}", ver_str));
+    output.step(&format!("Version: {ver_str}"));
     output.newline();
 
-    let pb = output.spinner(&format!("Downloading from {}", url));
+    let pb = output.spinner(&format!("Downloading from {url}"));
 
     let response = client
         .get(&url)
         .send()
-        .with_context(|| format!("Failed to download {}", url))?;
+        .with_context(|| format!("Failed to download {url}"))?;
 
     if !response.status().is_success() {
         pb.finish_and_clear();

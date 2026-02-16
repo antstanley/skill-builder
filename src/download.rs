@@ -26,7 +26,7 @@ pub fn download_url(client: &Client, url: &str) -> Result<String> {
     let response = client
         .get(url)
         .send()
-        .with_context(|| format!("Failed to fetch {}", url))?;
+        .with_context(|| format!("Failed to fetch {url}"))?;
 
     if !response.status().is_success() {
         anyhow::bail!("HTTP {} for {}", response.status(), url);
@@ -34,10 +34,11 @@ pub fn download_url(client: &Client, url: &str) -> Result<String> {
 
     response
         .text()
-        .with_context(|| format!("Failed to read response from {}", url))
+        .with_context(|| format!("Failed to read response from {url}"))
 }
 
 /// Extract all .md URLs from llms.txt content.
+#[must_use] 
 pub fn extract_urls(content: &str) -> Vec<String> {
     let re = Regex::new(r"https?://[^\s\)>\]]+\.md").unwrap();
     let urls: HashSet<String> = re
@@ -50,6 +51,7 @@ pub fn extract_urls(content: &str) -> Vec<String> {
 }
 
 /// Auto-detect the common path prefix from a list of URLs.
+#[must_use] 
 pub fn detect_path_prefix(urls: &[String]) -> Option<String> {
     if urls.is_empty() {
         return None;
@@ -96,7 +98,7 @@ pub fn detect_path_prefix(urls: &[String]) -> Option<String> {
 
 /// Convert a URL to a local file path within the source directory.
 pub fn url_to_local_path(url: &str, path_prefix: Option<&str>) -> Result<PathBuf> {
-    let parsed = Url::parse(url).with_context(|| format!("Invalid URL: {}", url))?;
+    let parsed = Url::parse(url).with_context(|| format!("Invalid URL: {url}"))?;
     let mut path = parsed.path().to_string();
 
     // Strip the path prefix if specified
@@ -114,6 +116,7 @@ pub fn url_to_local_path(url: &str, path_prefix: Option<&str>) -> Result<PathBuf
 }
 
 /// Update llms.txt content to use local file paths.
+#[must_use] 
 pub fn update_llms_txt_paths(content: &str, urls: &[String], path_prefix: Option<&str>) -> String {
     let mut updated = content.to_string();
 
@@ -158,7 +161,7 @@ pub fn download_skill_docs(
         .or_else(|| detect_path_prefix(&urls));
 
     if let Some(ref prefix) = path_prefix {
-        output.step(&format!("Using path prefix: {}", prefix));
+        output.step(&format!("Using path prefix: {prefix}"));
     }
 
     // Prepare source directory
@@ -222,9 +225,9 @@ pub fn download_skill_docs(
     let success_count = results.iter().filter(|r| r.success).count();
     let fail_count = results.iter().filter(|r| !r.success).count();
 
-    output.status("Downloaded", &format!("{} files", success_count));
+    output.status("Downloaded", &format!("{success_count} files"));
     if fail_count > 0 {
-        output.warn(&format!("Failed to download {} files", fail_count));
+        output.warn(&format!("Failed to download {fail_count} files"));
     }
 
     Ok(results)

@@ -9,7 +9,7 @@ use crate::storage::StorageOperations;
 const INDEX_KEY: &str = "skills_index.json";
 
 /// A single skill entry in the index.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexEntry {
     /// Skill name.
     pub name: String,
@@ -25,7 +25,7 @@ pub struct IndexEntry {
 }
 
 /// The top-level skills index stored in S3.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillsIndex {
     /// All indexed skills.
     pub skills: Vec<IndexEntry>,
@@ -33,11 +33,13 @@ pub struct SkillsIndex {
 
 impl SkillsIndex {
     /// Create an empty index.
-    pub fn new() -> Self {
+    #[must_use] 
+    pub const fn new() -> Self {
         Self { skills: Vec::new() }
     }
 
     /// Find a skill by name.
+    #[must_use] 
     pub fn find_skill(&self, name: &str) -> Option<&IndexEntry> {
         self.skills.iter().find(|s| s.name == name)
     }
@@ -98,13 +100,14 @@ impl SkillsIndex {
     }
 
     /// Get the latest version of a skill using semantic version comparison.
+    #[must_use] 
     pub fn latest_version(&self, name: &str) -> Option<&str> {
         self.find_skill(name).and_then(|entry| {
             entry
                 .versions
                 .keys()
                 .max_by(|a, b| compare_semver(a, b))
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
         })
     }
 }

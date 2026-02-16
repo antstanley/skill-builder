@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 /// Validation error types.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
     SkillMdNotFound,
     MissingFrontmatter,
@@ -27,7 +27,7 @@ impl std::fmt::Display for ValidationError {
             Self::MissingFrontmatter => {
                 write!(f, "SKILL.md missing YAML frontmatter (must start with ---)")
             }
-            Self::InvalidYaml(msg) => write!(f, "Invalid YAML frontmatter: {}", msg),
+            Self::InvalidYaml(msg) => write!(f, "Invalid YAML frontmatter: {msg}"),
             Self::EmptyFrontmatter => write!(f, "Frontmatter is empty"),
             Self::MissingName => write!(f, "Frontmatter missing 'name' field"),
             Self::EmptyName => write!(f, "Frontmatter 'name' field is empty"),
@@ -35,8 +35,7 @@ impl std::fmt::Display for ValidationError {
             Self::EmptyDescription => write!(f, "Frontmatter 'description' field is empty"),
             Self::DescriptionTooShort(len) => write!(
                 f,
-                "Frontmatter 'description' should be at least 50 characters (got {})",
-                len
+                "Frontmatter 'description' should be at least 50 characters (got {len})"
             ),
             Self::UnresolvedTodo => write!(f, "SKILL.md contains unresolved [TODO] placeholders"),
         }
@@ -52,7 +51,7 @@ pub struct ValidationResult {
 }
 
 impl ValidationResult {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             valid: true,
             errors: Vec::new(),
@@ -124,8 +123,7 @@ pub fn validate_skill<P: AsRef<Path>>(skill_path: P) -> ValidationResult {
         Ok(c) => c,
         Err(e) => {
             result.add_error(ValidationError::InvalidYaml(format!(
-                "Failed to read SKILL.md: {}",
-                e
+                "Failed to read SKILL.md: {e}"
             )));
             return result;
         }
@@ -152,7 +150,7 @@ pub fn validate_skill<P: AsRef<Path>>(skill_path: P) -> ValidationResult {
         None => result.add_error(ValidationError::MissingDescription),
         Some(desc) if desc.is_empty() => result.add_error(ValidationError::EmptyDescription),
         Some(desc) if desc.len() < 50 => {
-            result.add_error(ValidationError::DescriptionTooShort(desc.len()))
+            result.add_error(ValidationError::DescriptionTooShort(desc.len()));
         }
         Some(_) => {}
     }
@@ -188,7 +186,7 @@ pub fn print_validation_result(result: &ValidationResult, output: &crate::output
     } else {
         output.error("Validation failed:");
         for error in &result.errors {
-            output.step(&format!("- {}", error));
+            output.step(&format!("- {error}"));
         }
         for warning in &result.warnings {
             output.warn(warning);

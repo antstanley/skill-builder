@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// A skill configuration entry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillConfig {
     /// Unique name for the skill.
     pub name: String,
@@ -18,7 +18,7 @@ pub struct SkillConfig {
     /// URL to the llms.txt file.
     pub llms_txt_url: String,
 
-    /// Base URL for resolving relative paths. Auto-derived from llms_txt_url if not set.
+    /// Base URL for resolving relative paths. Auto-derived from `llms_txt_url` if not set.
     #[serde(default)]
     pub base_url: Option<String>,
 
@@ -28,7 +28,7 @@ pub struct SkillConfig {
 }
 
 impl SkillConfig {
-    /// Get the base URL, deriving it from llms_txt_url if not explicitly set.
+    /// Get the base URL, deriving it from `llms_txt_url` if not explicitly set.
     pub fn get_base_url(&self) -> Result<String> {
         if let Some(ref base) = self.base_url {
             return Ok(base.clone());
@@ -46,7 +46,7 @@ impl SkillConfig {
 }
 
 /// Local repository configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalRepositoryConfig {
     /// Path to the local repository directory. Defaults to $HOME/.skill-builder/local/.
     #[serde(default)]
@@ -58,7 +58,7 @@ pub struct LocalRepositoryConfig {
 }
 
 /// Repository configuration for S3-compatible skill storage.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepositoryConfig {
     /// Display name for the repository.
     #[serde(default)]
@@ -83,16 +83,19 @@ pub struct RepositoryConfig {
 
 impl RepositoryConfig {
     /// Whether a remote S3 repository is configured.
-    pub fn has_remote(&self) -> bool {
+    #[must_use] 
+    pub const fn has_remote(&self) -> bool {
         self.bucket_name.is_some()
     }
 
     /// Whether a local repository is configured.
-    pub fn has_local(&self) -> bool {
+    #[must_use] 
+    pub const fn has_local(&self) -> bool {
         self.local.is_some()
     }
 
     /// Get the resolved local repository path (configured or default).
+    #[must_use] 
     pub fn local_repo_path(&self) -> PathBuf {
         if let Some(ref local) = self.local {
             if let Some(ref path) = local.path {
@@ -103,11 +106,11 @@ impl RepositoryConfig {
     }
 
     /// Whether local repo acts as a cache for remote.
+    #[must_use] 
     pub fn local_is_cache(&self) -> bool {
         self.local
             .as_ref()
-            .map(|l| l.cache && self.has_remote())
-            .unwrap_or(false)
+            .is_some_and(|l| l.cache && self.has_remote())
     }
 }
 
@@ -116,6 +119,7 @@ fn default_region() -> String {
 }
 
 /// Default path for the local skill repository.
+#[must_use] 
 pub fn default_local_repo_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -124,6 +128,7 @@ pub fn default_local_repo_path() -> PathBuf {
 }
 
 /// Path to the global config directory.
+#[must_use] 
 pub fn global_config_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -131,6 +136,7 @@ pub fn global_config_dir() -> PathBuf {
 }
 
 /// Path to the global config file.
+#[must_use] 
 pub fn global_config_path() -> PathBuf {
     global_config_dir().join("skills.config.json")
 }
@@ -163,18 +169,20 @@ impl Config {
     }
 
     /// Find a skill by name.
+    #[must_use] 
     pub fn find_skill(&self, name: &str) -> Option<&SkillConfig> {
         self.skills.iter().find(|s| s.name == name)
     }
 
     /// Get all skill names.
+    #[must_use] 
     pub fn skill_names(&self) -> Vec<&str> {
         self.skills.iter().map(|s| s.name.as_str()).collect()
     }
 
     /// Merge another config into this one. Skills merge by name (other wins),
     /// repository replaces entirely if present in other.
-    pub fn merge(&mut self, other: &Config) {
+    pub fn merge(&mut self, other: &Self) {
         // Merge skills by name - other's skills take priority
         for other_skill in &other.skills {
             if let Some(pos) = self.skills.iter().position(|s| s.name == other_skill.name) {
@@ -211,7 +219,7 @@ impl Config {
         }
 
         // Return defaults
-        Ok(Config::default())
+        Ok(Self::default())
     }
 }
 

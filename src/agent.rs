@@ -21,7 +21,8 @@ pub const ALL_FRAMEWORKS: &[AgentFramework] = &[
 
 impl AgentFramework {
     /// Display name for the agent.
-    pub fn name(&self) -> &'static str {
+    #[must_use] 
+    pub const fn name(&self) -> &'static str {
         match self {
             Self::Claude => "Claude",
             Self::OpenCode => "OpenCode",
@@ -31,7 +32,8 @@ impl AgentFramework {
     }
 
     /// Project-level skill install directory.
-    pub fn project_skills_dir(&self) -> &'static str {
+    #[must_use] 
+    pub const fn project_skills_dir(&self) -> &'static str {
         match self {
             Self::Claude => ".claude/skills",
             Self::OpenCode => ".opencode/skills",
@@ -41,6 +43,7 @@ impl AgentFramework {
     }
 
     /// Global skill install directory (under home).
+    #[must_use] 
     pub fn global_skills_dir(&self) -> PathBuf {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         match self {
@@ -52,7 +55,7 @@ impl AgentFramework {
     }
 
     /// Directory markers that indicate this agent is configured in a project.
-    fn project_dir_markers(&self) -> &'static [&'static str] {
+    const fn project_dir_markers(&self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude"],
             Self::OpenCode => &[".opencode"],
@@ -62,7 +65,7 @@ impl AgentFramework {
     }
 
     /// File markers that indicate this agent is configured in a project.
-    fn project_file_markers(&self) -> &'static [&'static str] {
+    const fn project_file_markers(&self) -> &'static [&'static str] {
         match self {
             Self::Claude => &["CLAUDE.md"],
             Self::OpenCode => &["opencode.json"],
@@ -72,7 +75,7 @@ impl AgentFramework {
     }
 
     /// Directory markers for global detection (relative to home).
-    fn global_dir_markers(&self) -> &'static [&'static str] {
+    const fn global_dir_markers(&self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude"],
             Self::OpenCode => &[".config/opencode"],
@@ -90,7 +93,7 @@ pub enum AgentTarget {
     Auto,
 }
 
-/// Parse an `--agent` flag value into an AgentTarget.
+/// Parse an `--agent` flag value into an `AgentTarget`.
 pub fn parse_agent_flag(value: Option<&str>) -> anyhow::Result<AgentTarget> {
     match value {
         None => Ok(AgentTarget::Auto),
@@ -100,13 +103,13 @@ pub fn parse_agent_flag(value: Option<&str>) -> anyhow::Result<AgentTarget> {
         Some("kiro") => Ok(AgentTarget::Specific(AgentFramework::Kiro)),
         Some("all") => Ok(AgentTarget::All),
         Some(other) => anyhow::bail!(
-            "Unknown agent '{}'. Valid options: claude, opencode, codex, kiro, all",
-            other
+            "Unknown agent '{other}'. Valid options: claude, opencode, codex, kiro, all"
         ),
     }
 }
 
 /// Detect which agent frameworks are configured in a project directory.
+#[must_use] 
 pub fn detect_project_agents(project_root: &Path) -> Vec<AgentFramework> {
     let mut agents: Vec<AgentFramework> = ALL_FRAMEWORKS
         .iter()
@@ -131,6 +134,7 @@ pub fn detect_project_agents(project_root: &Path) -> Vec<AgentFramework> {
 }
 
 /// Detect which agent frameworks are configured globally.
+#[must_use] 
 pub fn detect_global_agents() -> Vec<AgentFramework> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut agents: Vec<AgentFramework> = ALL_FRAMEWORKS
@@ -158,6 +162,7 @@ pub fn detect_global_agents() -> Vec<AgentFramework> {
 /// 2. If target is Specific, return that agent's dir
 /// 3. If target is All, return all supported agent dirs
 /// 4. If target is Auto, detect agents and return dirs for all detected
+#[must_use] 
 pub fn resolve_install_dirs(
     target: &AgentTarget,
     explicit_dir: Option<&Path>,

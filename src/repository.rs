@@ -31,7 +31,7 @@ pub struct Repository<S: StorageOperations> {
 
 impl<S: StorageOperations> Repository<S> {
     /// Create a new repository without a local cache.
-    pub fn new(client: S) -> Self {
+    pub const fn new(client: S) -> Self {
         Self {
             client,
             local_cache: None,
@@ -39,7 +39,7 @@ impl<S: StorageOperations> Repository<S> {
     }
 
     /// Create a new repository with a local cache layer.
-    pub fn new_with_cache(client: S, local_cache: LocalStorageClient) -> Self {
+    pub const fn new_with_cache(client: S, local_cache: LocalStorageClient) -> Self {
         Self {
             client,
             local_cache: Some(local_cache),
@@ -73,10 +73,10 @@ impl<S: StorageOperations> Repository<S> {
             "skills/{}/{}/{}.skill",
             params.name, params.version, params.name
         );
-        let pb = output.spinner(&format!("Uploading {}", skill_key));
+        let pb = output.spinner(&format!("Uploading {skill_key}"));
         self.client.put_object(&skill_key, &skill_data)?;
         pb.finish_and_clear();
-        output.step(&format!("Uploaded: {}", skill_key));
+        output.step(&format!("Uploaded: {skill_key}"));
 
         // Upload changelog if provided
         if let Some(changelog_path) = params.changelog {
@@ -86,7 +86,7 @@ impl<S: StorageOperations> Repository<S> {
             let changelog_key = format!("skills/{}/{}/CHANGELOG.md", params.name, params.version);
             self.client
                 .put_object(&changelog_key, changelog_data.as_bytes())?;
-            output.step(&format!("Uploaded: {}", changelog_key));
+            output.step(&format!("Uploaded: {changelog_key}"));
         }
 
         // Upload source archive if provided
@@ -97,7 +97,7 @@ impl<S: StorageOperations> Repository<S> {
                 params.name, params.version, params.name
             );
             self.client.put_object(&source_key, &archive)?;
-            output.step(&format!("Uploaded: {}", source_key));
+            output.step(&format!("Uploaded: {source_key}"));
         }
 
         // Update index
@@ -128,17 +128,16 @@ impl<S: StorageOperations> Repository<S> {
             Some(v) => v.to_string(),
             None => index
                 .latest_version(name)
-                .context(format!("Skill '{}' not found in repository", name))?
+                .context(format!("Skill '{name}' not found in repository"))?
                 .to_string(),
         };
 
         // Check local cache first
         if let Some(ref cache) = self.local_cache {
-            let cache_key = format!("skills/{}/{}/{}.skill", name, resolved_version, name);
+            let cache_key = format!("skills/{name}/{resolved_version}/{name}.skill");
             if cache.object_exists(&cache_key).unwrap_or(false) {
                 output.info(&format!(
-                    "Using cached version: {} v{}",
-                    name, resolved_version
+                    "Using cached version: {name} v{resolved_version}"
                 ));
                 let data = cache.get_object(&cache_key)?;
                 return write_output(name, &data, output_dir);
@@ -148,22 +147,21 @@ impl<S: StorageOperations> Repository<S> {
         // Find S3 path from index
         let entry = index
             .find_skill(name)
-            .context(format!("Skill '{}' not found in repository", name))?;
+            .context(format!("Skill '{name}' not found in repository"))?;
         let s3_path = entry.versions.get(&resolved_version).with_context(|| {
             format!(
-                "Version '{}' not found for skill '{}'",
-                resolved_version, name
+                "Version '{resolved_version}' not found for skill '{name}'"
             )
         })?;
 
         // Download from primary storage
-        let pb = output.spinner(&format!("Downloading {} v{}", name, resolved_version));
+        let pb = output.spinner(&format!("Downloading {name} v{resolved_version}"));
         let data = self.client.get_object(s3_path)?;
         pb.finish_and_clear();
 
         // Store in local cache
         if let Some(ref cache) = self.local_cache {
-            let cache_key = format!("skills/{}/{}/{}.skill", name, resolved_version, name);
+            let cache_key = format!("skills/{name}/{resolved_version}/{name}.skill");
             cache.put_object(&cache_key, &data).ok();
         }
 
@@ -189,13 +187,13 @@ impl<S: StorageOperations> Repository<S> {
 
         let delete_version_keys = |client: &S, n: &str, v: &str, out: &Output| {
             let keys = [
-                format!("skills/{}/{}/{}.skill", n, v, n),
-                format!("skills/{}/{}/CHANGELOG.md", n, v),
-                format!("source/{}/{}/{}-source.zip", n, v, n),
+                format!("skills/{n}/{v}/{n}.skill"),
+                format!("skills/{n}/{v}/CHANGELOG.md"),
+                format!("source/{n}/{v}/{n}-source.zip"),
             ];
             for key in &keys {
                 if let Err(e) = client.delete_object(key) {
-                    out.warn(&format!("Failed to delete {}: {}", key, e));
+                    out.warn(&format!("Failed to delete {key}: {e}"));
                 }
             }
         };
@@ -203,16 +201,16 @@ impl<S: StorageOperations> Repository<S> {
         if let Some(ver) = version {
             delete_version_keys(&self.client, name, ver, output);
             index.remove_version(name, ver);
-            output.step(&format!("Deleted version {} of {}", ver, name));
+            output.step(&format!("Deleted version {ver} of {name}"));
         } else {
             let entry = index.find_skill(name);
             if let Some(entry) = entry {
-                for ver in entry.versions.keys().cloned().collect::<Vec<_>>() {
-                    delete_version_keys(&self.client, name, &ver, output);
+                for ver in entry.versions.keys() {
+                    delete_version_keys(&self.client, name, ver, output);
                 }
             }
             index.remove_skill(name);
-            output.step(&format!("Deleted all versions of {}", name));
+            output.step(&format!("Deleted all versions of {name}"));
         }
 
         save_index(&self.client, &index)?;
@@ -220,10 +218,10 @@ impl<S: StorageOperations> Repository<S> {
         // Clear local cache
         if let Some(ref cache) = self.local_cache {
             if let Some(ver) = version {
-                let cache_key = format!("skills/{}/{}/{}.skill", name, ver, name);
+                let cache_key = format!("skills/{name}/{ver}/{name}.skill");
                 cache.delete_object(&cache_key).ok();
             } else {
-                let prefix = format!("skills/{}/", name);
+                let prefix = format!("skills/{name}/");
                 if let Ok(keys) = cache.list_objects(&prefix) {
                     for key in keys {
                         cache.delete_object(&key).ok();
@@ -258,7 +256,7 @@ fn write_output(name: &str, data: &[u8], output_dir: Option<&Path>) -> Result<Pa
         None => std::env::temp_dir().join("skill-builder"),
     };
     std::fs::create_dir_all(&dir)?;
-    let dest = dir.join(format!("{}.skill", name));
+    let dest = dir.join(format!("{name}.skill"));
     std::fs::write(&dest, data)?;
     Ok(dest)
 }
@@ -300,7 +298,7 @@ fn create_source_archive(source_dir: &Path, name: &str) -> Result<Vec<u8>> {
         Ok(())
     }
 
-    let prefix = format!("{}-source", name);
+    let prefix = format!("{name}-source");
     add_dir_to_zip(&mut zip, &base, &base, &prefix, options)?;
 
     let cursor = zip.finish()?;

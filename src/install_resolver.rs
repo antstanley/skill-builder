@@ -21,7 +21,7 @@ pub struct InstallOptions<'a> {
 }
 
 /// Which source a skill was installed from.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InstallSource {
     Local,
     Remote,

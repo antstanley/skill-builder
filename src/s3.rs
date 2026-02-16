@@ -47,7 +47,7 @@ impl StorageOperations for S3Client {
         let response = self
             .runtime
             .block_on(self.bucket.put_object(key, data))
-            .with_context(|| format!("Failed to put object: {}", key))?;
+            .with_context(|| format!("Failed to put object: {key}"))?;
 
         if response.status_code() >= 300 {
             anyhow::bail!(
@@ -63,10 +63,10 @@ impl StorageOperations for S3Client {
         let response = self
             .runtime
             .block_on(self.bucket.get_object(key))
-            .with_context(|| format!("Failed to get object: {}", key))?;
+            .with_context(|| format!("Failed to get object: {key}"))?;
 
         if response.status_code() == 404 {
-            anyhow::bail!("Object not found: {}", key);
+            anyhow::bail!("Object not found: {key}");
         }
         if response.status_code() >= 300 {
             anyhow::bail!(
@@ -82,7 +82,7 @@ impl StorageOperations for S3Client {
         let response = self
             .runtime
             .block_on(self.bucket.delete_object(key))
-            .with_context(|| format!("Failed to delete object: {}", key))?;
+            .with_context(|| format!("Failed to delete object: {key}"))?;
 
         if response.status_code() >= 300 {
             anyhow::bail!(
@@ -98,7 +98,7 @@ impl StorageOperations for S3Client {
         let results = self
             .runtime
             .block_on(self.bucket.list(prefix.to_string(), None))
-            .with_context(|| format!("Failed to list objects with prefix: {}", prefix))?;
+            .with_context(|| format!("Failed to list objects with prefix: {prefix}"))?;
 
         let keys: Vec<String> = results
             .into_iter()
@@ -119,9 +119,9 @@ impl StorageOperations for S3Client {
     }
 }
 
-/// Mock S3 client for testing, backed by an in-memory HashMap.
+/// Mock S3 client for testing, backed by an in-memory `HashMap`.
 pub mod mock {
-    use super::*;
+    use super::{StorageOperations, Result};
     use std::cell::RefCell;
     use std::collections::HashMap;
 
@@ -136,6 +136,7 @@ pub mod mock {
     }
 
     impl MockS3Client {
+        #[must_use] 
         pub fn new() -> Self {
             Self {
                 store: RefCell::new(HashMap::new()),
@@ -156,7 +157,7 @@ pub mod mock {
                 .borrow()
                 .get(key)
                 .cloned()
-                .ok_or_else(|| anyhow::anyhow!("Object not found: {}", key))
+                .ok_or_else(|| anyhow::anyhow!("Object not found: {key}"))
         }
 
         fn delete_object(&self, key: &str) -> Result<()> {

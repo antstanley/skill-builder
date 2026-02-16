@@ -112,7 +112,7 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
     if !validation.valid {
         output.error("Validation failed:");
         for error in &validation.errors {
-            output.step(&format!("- {}", error));
+            output.step(&format!("- {error}"));
         }
         anyhow::bail!("Skill validation failed");
     }
@@ -127,7 +127,7 @@ pub fn package_skill_with_output<P: AsRef<Path>, Q: AsRef<Path>>(
     let files = collect_files(skill_path)?;
 
     // Create output file
-    let output_path = output_dir.join(format!("{}.skill", skill_name));
+    let output_path = output_dir.join(format!("{skill_name}.skill"));
     let file = File::create(&output_path)?;
     let mut zip = ZipWriter::new(file);
 

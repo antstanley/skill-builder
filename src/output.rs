@@ -16,6 +16,7 @@ impl Output {
     ///
     /// Agent mode activates if `agent_mode_flag` is true OR `SB_AGENT_OUTPUT=1` env var is set.
     /// Colors are disabled if `NO_COLOR` env var is set or stdout is not a TTY.
+    #[must_use] 
     pub fn new(agent_mode_flag: bool) -> Self {
         let term = console::Term::stderr();
         let agent_mode =
@@ -30,29 +31,30 @@ impl Output {
     }
 
     /// Whether agent output mode is active.
-    pub fn is_agent_mode(&self) -> bool {
+    #[must_use] 
+    pub const fn is_agent_mode(&self) -> bool {
         self.agent_mode
     }
 
     /// Print a success status line.
     pub fn status(&self, prefix: &str, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[OK] {}: {}", prefix, msg));
+            let _ = self.term.write_line(&format!("[OK] {prefix}: {msg}"));
         } else if self.no_color {
-            let _ = self.term.write_line(&format!("{}: {}", prefix, msg));
+            let _ = self.term.write_line(&format!("{prefix}: {msg}"));
         } else {
             let check = Style::new().green().apply_to("\u{2713}");
             let bold_prefix = Style::new().bold().apply_to(prefix);
             let _ = self
                 .term
-                .write_line(&format!("{} {} {}", check, bold_prefix, msg));
+                .write_line(&format!("{check} {bold_prefix} {msg}"));
         }
     }
 
     /// Print an informational message.
     pub fn info(&self, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[INFO] {}", msg));
+            let _ = self.term.write_line(&format!("[INFO] {msg}"));
         } else {
             let _ = self.term.write_line(msg);
         }
@@ -61,30 +63,30 @@ impl Output {
     /// Print an indented step message.
     pub fn step(&self, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[STEP] {}", msg));
+            let _ = self.term.write_line(&format!("[STEP] {msg}"));
         } else {
-            let _ = self.term.write_line(&format!("  {}", msg));
+            let _ = self.term.write_line(&format!("  {msg}"));
         }
     }
 
     /// Print a warning message.
     pub fn warn(&self, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[WARN] {}", msg));
+            let _ = self.term.write_line(&format!("[WARN] {msg}"));
         } else if self.no_color {
-            let _ = self.term.write_line(&format!("Warning: {}", msg));
+            let _ = self.term.write_line(&format!("Warning: {msg}"));
         } else {
             let warn = Style::new().yellow().apply_to("\u{26a0}");
-            let _ = self.term.write_line(&format!("{} {}", warn, msg));
+            let _ = self.term.write_line(&format!("{warn} {msg}"));
         }
     }
 
     /// Print an error message to stderr.
     pub fn error(&self, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[ERROR] {}", msg));
+            let _ = self.term.write_line(&format!("[ERROR] {msg}"));
         } else if self.no_color {
-            let _ = self.term.write_line(&format!("Error: {}", msg));
+            let _ = self.term.write_line(&format!("Error: {msg}"));
         } else {
             let cross = Style::new().red().apply_to("\u{2717}");
             let style = Style::new().red().bold();
@@ -97,7 +99,7 @@ impl Output {
     /// Print a bold header.
     pub fn header(&self, msg: &str) {
         if self.agent_mode {
-            let _ = self.term.write_line(&format!("[INFO] {}", msg));
+            let _ = self.term.write_line(&format!("[INFO] {msg}"));
         } else if self.no_color {
             let _ = self.term.write_line(msg);
         } else {
@@ -116,12 +118,13 @@ impl Output {
     /// Create a spinner with a message.
     ///
     /// In agent mode, just prints the message and returns a hidden progress bar.
+    #[must_use] 
     pub fn spinner(&self, msg: &str) -> ProgressBar {
         if self.agent_mode || self.no_color || !self.term.is_term() {
             let _ = self.term.write_line(&if self.agent_mode {
-                format!("[STEP] {}", msg)
+                format!("[STEP] {msg}")
             } else {
-                format!("  {}...", msg)
+                format!("  {msg}...")
             });
             ProgressBar::hidden()
         } else {
@@ -140,12 +143,13 @@ impl Output {
     /// Create a progress bar with a length and message.
     ///
     /// In agent mode, just prints the message and returns a hidden progress bar.
+    #[must_use] 
     pub fn progress_bar(&self, len: u64, msg: &str) -> ProgressBar {
         if self.agent_mode || self.no_color || !self.term.is_term() {
             let _ = self.term.write_line(&if self.agent_mode {
-                format!("[STEP] {} ({})", msg, len)
+                format!("[STEP] {msg} ({len})")
             } else {
-                format!("  {} ({} items)...", msg, len)
+                format!("  {msg} ({len} items)...")
             });
             ProgressBar::hidden()
         } else {
@@ -167,7 +171,7 @@ impl Output {
         }
 
         // Calculate column widths
-        let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let num_cols = rows.iter().map(std::vec::Vec::len).max().unwrap_or(0);
         let mut widths = vec![0usize; num_cols];
         for row in rows {
             for (i, cell) in row.iter().enumerate() {
